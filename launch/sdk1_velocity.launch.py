@@ -18,21 +18,21 @@ def generate_launch_description():
         description='Local port for UDP communication')
     
     control_rate_arg = DeclareLaunchArgument(
-        'control_rate_hz', default_value='500',
-        description='Control loop rate in Hz (500Hz for low-level control)')
+        'control_rate_hz', default_value='50',
+        description='Control loop rate in Hz (50Hz for policy control)')
     
     stale_timeout_arg = DeclareLaunchArgument(
         'stale_timeout_s', default_value='0.5',
         description='Stop if no cmd_vel received for this many seconds')
     
     max_vx_arg = DeclareLaunchArgument('max_vx', default_value='2.0')
-    max_vy_arg = DeclareLaunchArgument('max_vy', default_value='1.0')
+    max_vy_arg = DeclareLaunchArgument('max_vy', default_value='0.5')
     max_wz_arg = DeclareLaunchArgument('max_wz', default_value='2.0')
     
     node = Node(
         package='unitree_control',
-        executable='sdk1_velocity_node',
-        name='sdk1_velocity_node',
+        executable='aliengo_node',
+        name='aliengo_node',
         output='screen',
         parameters=[{
             'target_ip': LaunchConfiguration('target_ip'),

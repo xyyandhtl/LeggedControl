@@ -14,21 +14,21 @@ def generate_launch_description():
         description='Control loop rate in Hz')
 
     stale_timeout_arg = DeclareLaunchArgument(
-        'stale_timeout_s', default_value='0.5',
+        'stale_timeout_s', default_value='1.0',
         description='Stop if no cmd_vel received for this many seconds')
 
     auto_stand_arg = DeclareLaunchArgument(
         'auto_stand', default_value='true',
         description='Call StandUp on start')
 
-    max_vx_arg = DeclareLaunchArgument('max_vx', default_value='1.5')
+    max_vx_arg = DeclareLaunchArgument('max_vx', default_value='2.0')
     max_vy_arg = DeclareLaunchArgument('max_vy', default_value='0.5')
     max_wz_arg = DeclareLaunchArgument('max_wz', default_value='1.5')
 
     node = Node(
         package='unitree_control',
-        executable='velocity_node',
-        name='velocity_node',
+        executable='go2_node',
+        name='go2_node',
         output='screen',
         parameters=[{
             'network_interface': LaunchConfiguration('network_interface'),
