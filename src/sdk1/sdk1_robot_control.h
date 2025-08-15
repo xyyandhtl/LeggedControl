@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "unitree_legged_sdk/unitree_legged_sdk.h"
+#include "unitree_legged_sdk/unitree_joystick.h"
 #include <onnxruntime_cxx_api.h>
 
 using namespace UNITREE_LEGGED_SDK;
@@ -50,11 +51,14 @@ public:
     void udpSend();
     void stopMotors();
 
+    xRockerBtnDataStruct getJoystickData() const;
+
 private:
     UDP udp_;
     Safety safe_;
     LowCmd cmd_ = {0};
     LowState state_ = {0};
+    xRockerBtnDataStruct key_data_ = {0}; // Joystick data
     static constexpr int LOW_CMD_LENGTH = 610;
     static constexpr int LOW_STATE_LENGTH = 771;
 
@@ -78,6 +82,6 @@ private:
     static inline float clip(float v, float lo, float hi) {
         return v < lo ? lo : (v > hi ? hi : v);
     }
-    };
+};
 
 #endif // SDK1_ROBOT_CONTROL_HPP

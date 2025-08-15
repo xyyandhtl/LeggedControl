@@ -366,6 +366,7 @@ void SDK1RobotControl::udpRecv()
 {
     udp_.Recv();
     udp_.GetRecv(state_);
+    std::memcpy(&key_data_, &state_.wirelessRemote, sizeof(xRockerBtnDataStruct)); // Update joystick data
 }
 
 void SDK1RobotControl::udpSend()
@@ -383,6 +384,11 @@ void SDK1RobotControl::stopMotors()
         cmd_.motorCmd[i].tau = 0.0f;
     }
     udp_.SetSend(cmd_);
+}
+
+xRockerBtnDataStruct SDK1RobotControl::getJoystickData() const
+{
+    return key_data_;
 }
 
 std::array<float, 3> SDK1RobotControl::gravFromQuatWxyz(const std::array<float, 4>& q)
