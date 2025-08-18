@@ -10,8 +10,8 @@
 #include <onnxruntime_cxx_api.h>
 #include "../common/utils.h"
 
-SDK1RobotObsConfig SDK1RobotObsConfig::FromFile(const std::string& path, bool* ok) {
-    SDK1RobotObsConfig cfg;
+SDK1PolicyConfig SDK1PolicyConfig::FromFile(const std::string& path, bool* ok) {
+    SDK1PolicyConfig cfg;
     std::ifstream fin(path);
     bool good = fin.good();
     if (!fin) {
@@ -45,6 +45,8 @@ SDK1RobotObsConfig SDK1RobotObsConfig::FromFile(const std::string& path, bool* o
         else if (key == "obs_clip") cfg.obs_clip = std::stof(val);
         else if (key == "history_steps") cfg.history_steps = static_cast<std::size_t>(std::stoul(val));
         else if (key == "obs_size") cfg.obs_size = std::stoi(val);
+        else if (key == "kp") cfg.kp = std::stof(val);
+        else if (key == "kd") cfg.kd = std::stof(val);
         else if (key == "dft_dof_pos") {
             std::cout << "[SDK1]Parseing dft_dof_pos: " << std::endl;
             if (!parse_list<float, 12>(val, cfg.dft_dof_pos))
@@ -68,7 +70,7 @@ SDK1RobotObsConfig SDK1RobotObsConfig::FromFile(const std::string& path, bool* o
     return cfg;
 }
 
-SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &target_ip, uint16_t target_port)
+SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &target_ip, uint16_t target_port, const std::string& config_path)
     : udp_(local_port, target_ip.c_str(), target_port, LOW_CMD_LENGTH, LOW_STATE_LENGTH),
       safe_(LeggedType::Aliengo)
 {
@@ -80,21 +82,20 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
     cmd_.levelFlag = LOWLEVEL;
 
     // Load config
-    const char* home = std::getenv("HOME");
-    std::string cfg_path = std::string(home) + "/.config/legged/sdk1_config.ini";
+    config_path_ = config_path;
     bool ok = false;
-    obs_cfg_ = SDK1RobotObsConfig::FromFile(cfg_path, &ok);
-    std::cout << "[SDK1] Load config: " << cfg_path << (ok ? " [OK]" : " [ERR]") << std::endl;
-    // if (ok) {
-    //     std::cout << "[SDK1] dft_dof_pos: " << obs_cfg_.dft_dof_pos << std::endl;
-    //     std::cout << "[SDK1] joint_idx_rob2pol: " << obs_cfg_.joint_idx_rob2pol << std::endl;
-    // }     
+    obs_cfg_ = SDK1PolicyConfig::FromFile(config_path, &ok);
+    std::cout << "[SDK1] Load config: " << config_path << (ok ? " [OK]" : " [ERR]") << std::endl;
 
     // Ensure buffers
     ensureObsBuffers();
     std::cout << "[SDK2] Observation buffers prepared: obs_size=" << obs_cfg_.obs_size
               << " history_steps=" << obs_cfg_.history_steps << std::endl;
 
+    size_t pos = config_path_.find_last_of('/');
+    std::string parent_dir = config_path_.substr(0, pos + 1);
+    std::string onnx_path = parent_dir + obs_cfg_.onnx_model_path;
+    std::cout << "[SDK1] Load onnx_path: " << onnx_path << std::endl;
     // Load ONNX in ctor
     try {
         ort_env_ = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "him_policy");
@@ -102,7 +103,7 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
         opt.SetIntraOpNumThreads(1);
         opt.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
 
-        ort_session_ = std::make_unique<Ort::Session>(*ort_env_, obs_cfg_.onnx_model_path.c_str(), opt);
+        ort_session_ = std::make_unique<Ort::Session>(*ort_env_, onnx_path.c_str(), opt);
 
         // IO names
         Ort::AllocatorWithDefaultOptions allocator;
@@ -128,47 +129,6 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
             std::cout << "[SDK1] ONNX loaded: " << obs_cfg_.onnx_model_path
                       << " input=" << ort_input_names_str_[0]
                       << " output=" << ort_output_names_str_[0] << std::endl;
-
-            // —— Warmup: 一次性推断自检（使用 obs_size*history_steps 的全0输入）——
-            // try {
-            //     const std::size_t frame = static_cast<std::size_t>(obs_cfg_.obs_size);
-            //     const std::size_t total = frame * std::max<std::size_t>(obs_cfg_.history_steps, std::size_t(1));
-            //     std::vector<float> dummy(total, 0.0f);
-
-            //     std::array<int64_t, 2> ishape{1, static_cast<int64_t>(total)};
-            //     Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
-            //     Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-            //         mem, dummy.data(), dummy.size(), ishape.data(), ishape.size());
-
-            //     auto outs = ort_session_->Run(Ort::RunOptions{nullptr},
-            //                                   ort_input_names_.data(), &input_tensor, 1,
-            //                                   ort_output_names_.data(), 1);
-
-            //     if (outs.empty() || !outs[0].IsTensor()) {
-            //         std::cerr << "[SDK1] ONNX warmup failed: empty or non-tensor output" << std::endl;
-            //     } else {
-            //         auto ti = outs[0].GetTensorTypeAndShapeInfo();
-            //         auto out_shape = ti.GetShape();
-            //         std::cout << "[SDK1] ONNX warmup ok. output ndim=" << out_shape.size();
-            //         std::cout << " shape=[";
-            //         for (size_t i = 0; i < out_shape.size(); ++i) {
-            //             if (i) std::cout << ',';
-            //             std::cout << out_shape[i];
-            //         }
-            //         std::cout << "] elem=" << ti.GetElementCount() << std::endl;
-
-            //         // 打印 1x12 输出
-            //         const float* warm_out = outs[0].GetTensorData<float>();
-            //         std::cout << "[SDK1] ONNX warmup output: ";
-            //         for (int i = 0; i < 12; ++i) {
-            //             if (i) std::cout << ", ";
-            //             std::cout << warm_out[i];
-            //         }
-            //         std::cout << std::endl;
-            //     }
-            // } catch (const Ort::Exception& we) {
-            //     std::cerr << "[SDK1] ONNX warmup error: " << we.what() << std::endl;
-            // }
         }
     } catch (const Ort::Exception& e) {
         std::cerr << "[SDK1] ONNX load error: " << e.what()
@@ -189,8 +149,8 @@ void SDK1RobotControl::applyPositionControl(const std::array<double, 12> &joint_
     for (int i = 0; i < 12; i++) {
         cmd_.motorCmd[i].q  = joint_positions[i];
         cmd_.motorCmd[i].dq = 0.0;
-        cmd_.motorCmd[i].Kp = 40.0;
-        cmd_.motorCmd[i].Kd = 2.0;
+        cmd_.motorCmd[i].Kp = obs_cfg_.kp;
+        cmd_.motorCmd[i].Kd = obs_cfg_.kd;
         cmd_.motorCmd[i].tau = 0.0f;
     }
 
@@ -245,12 +205,15 @@ void SDK1RobotControl::applyVelCmdControl(double vx, double vy, double wz)
         float* out = outputs[0].GetTensorMutableData<float>();
 
         // 打印 1x12 输出
-        std::cout << "[SDK1] ONNX infer out: ";
-        for (int i = 0; i < 12; ++i) {
-            if (i) std::cout << ", ";
-            std::cout << out[i];
+        static uint64_t policy_cnt = 0;
+        if ((++policy_cnt % 50) == 0) {
+            std::cout << "[SDK1] ONNX infer out: ";
+            for (int i = 0; i < 12; ++i) {
+                if (i) std::cout << ", ";
+                std::cout << out[i];
+            }
+            std::cout << std::endl;
         }
-        std::cout << std::endl;
 
         // 保存原始策略动作（policy 顺序）到 last_act_
         for (int i = 0; i < 12; ++i) {
@@ -272,7 +235,7 @@ void SDK1RobotControl::applyVelCmdControl(double vx, double vy, double wz)
 }
 
 // ---- methods for observations ----
-void SDK1RobotControl::setObsConfig(const SDK1RobotObsConfig& cfg)
+void SDK1RobotControl::setObsConfig(const SDK1PolicyConfig& cfg)
 {
     obs_cfg_ = cfg;
     compute_pol2rob_from_rob2pol(obs_cfg_.joint_idx_rob2pol, obs_cfg_.joint_idx_pol2rgb);
@@ -357,7 +320,7 @@ SDK1RobotObsResult SDK1RobotControl::getRobotObs()
         std::cout << "[SDK2] getRobotObs: obs_size=" << obs_cfg_.obs_size
                   << " history_steps=" << obs_cfg_.history_steps
                   << " motors=" << state_.motorState.size()
-                  << " sample0=" << (res.his_obs.empty() ? 0.0f : res.his_obs[0]) << std::endl;
+                  << std::endl;
     }
     return res;
 }

@@ -30,7 +30,8 @@ public:
         max_wz_ = this->declare_parameter<double>("max_wz", 1.5);
         stale_timeout_s_ = this->declare_parameter<double>("stale_timeout_s", 0.5);
 
-        robot_control_ = std::make_unique<SDK2RobotControl>(network_interface, timeout_s, auto_stand);
+        std::string config_path = this->declare_parameter<std::string>("config_path", "");
+        robot_control_ = std::make_unique<SDK2RobotControl>(network_interface, timeout_s, auto_stand, config_path);
 
         cmd_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
             "/cmd_vel", rclcpp::QoS(10),

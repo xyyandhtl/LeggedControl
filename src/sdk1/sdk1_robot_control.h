@@ -12,7 +12,7 @@
 using namespace UNITREE_LEGGED_SDK;
 
 // Add a small config and result type for observations
-struct SDK1RobotObsConfig {
+struct SDK1PolicyConfig {
     std::string onnx_model_path = "policy_model.onnx";
     float act_scale = 0.5f;
     float vel_scale = 2.0f;
@@ -20,13 +20,15 @@ struct SDK1RobotObsConfig {
     float dof_pos_scale = 1.0f;
     float dof_vel_scale = 0.05f;
     float obs_clip = 100.0f;
+    float kp = 40.0f; // PD gain
+    float kd = 2.0f;  // PD gain
     std::array<float, 12> dft_dof_pos = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     std::array<int, 12> joint_idx_rob2pol = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
     std::array<int, 12> joint_idx_pol2rgb = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
     std::size_t history_steps = 6; // number of past frames to keep (1 = current only)
     int obs_size = 45;             // 3+3+3+12+12+12
 
-    static SDK1RobotObsConfig FromFile(const std::string& path, bool* ok = nullptr);
+    static SDK1PolicyConfig FromFile(const std::string& path, bool* ok = nullptr);
 };
 
 struct SDK1RobotObsResult {
@@ -37,14 +39,14 @@ struct SDK1RobotObsResult {
 class SDK1RobotControl
 {
 public:
-    SDK1RobotControl(uint16_t local_port, const std::string &target_ip, uint16_t target_port);
+    SDK1RobotControl(uint16_t local_port, const std::string &target_ip, uint16_t target_port, const std::string& config_path);
     ~SDK1RobotControl();
     
     // Low-level position control interface (auto-switch to LowLevel)
     void applyPositionControl(const std::array<double, 12> &joint_positions);
     void applyVelCmdControl(double vx, double vy, double wz);
 
-    void setObsConfig(const SDK1RobotObsConfig& cfg);
+    void setObsConfig(const SDK1PolicyConfig& cfg);
     SDK1RobotObsResult getRobotObs();
 
     void udpRecv();
@@ -63,7 +65,8 @@ private:
     static constexpr int LOW_STATE_LENGTH = 771;
 
     // Observation-related state
-    SDK1RobotObsConfig obs_cfg_;
+    std::string config_path_;
+    SDK1PolicyConfig obs_cfg_;
     std::vector<float> his_obs_;
     std::array<float, 3> last_cmd_{0.0f, 0.0f, 0.0f};
     std::array<float, 12> last_act_{};

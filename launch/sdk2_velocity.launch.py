@@ -1,13 +1,20 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
-
+from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
+    package_path = get_package_share_directory('unitree_control')
+    config_file_path = PathJoinSubstitution([package_path, 'config', 'sdk2_config.ini'])
+
     network_interface_arg = DeclareLaunchArgument(
         'network_interface', default_value='eth0',
         description='Network interface for Unitree DDS, e.g., eth0/enp3s0')
+
+    timeout_arg = DeclareLaunchArgument(
+        'timeout_s', default_value='5.0',
+        description='sport client timeout in seconds')
 
     control_rate_arg = DeclareLaunchArgument(
         'control_rate_hz', default_value='50',
@@ -32,17 +39,20 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'network_interface': LaunchConfiguration('network_interface'),
+            'timeout_s': LaunchConfiguration('timeout_s'),
             'control_rate_hz': LaunchConfiguration('control_rate_hz'),
             'stale_timeout_s': LaunchConfiguration('stale_timeout_s'),
             'auto_stand': LaunchConfiguration('auto_stand'),
             'max_vx': LaunchConfiguration('max_vx'),
             'max_vy': LaunchConfiguration('max_vy'),
             'max_wz': LaunchConfiguration('max_wz'),
+            'config_path': config_file_path,
         }]
     )
 
     return LaunchDescription([
         network_interface_arg,
+        timeout_arg,
         control_rate_arg,
         stale_timeout_arg,
         auto_stand_arg,

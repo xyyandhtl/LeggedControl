@@ -20,13 +20,13 @@ using unitree::robot::ChannelPublisherPtr;
 using unitree::robot::ChannelSubscriber;
 using unitree::robot::ChannelSubscriberPtr;
 
-SDK2RobotObsConfig SDK2RobotObsConfig::FromFile(const std::string& path, bool* ok) {
-    SDK2RobotObsConfig cfg;
+SDK2PolicyConfig SDK2PolicyConfig::FromFile(const std::string& path, bool* ok) {
+    SDK2PolicyConfig cfg;
     std::ifstream fin(path);
     bool good = fin.good();
     if (!fin) {
         if (ok) *ok = false;
-        std::cerr << "[SDK1] Config open failed: " << path << std::endl;
+        std::cerr << "[SDK2] Config open failed: " << path << std::endl;
         return cfg;
     }
     std::string line;
@@ -55,6 +55,8 @@ SDK2RobotObsConfig SDK2RobotObsConfig::FromFile(const std::string& path, bool* o
         else if (key == "obs_clip") cfg.obs_clip = std::stof(val);
         else if (key == "history_steps") cfg.history_steps = static_cast<std::size_t>(std::stoul(val));
         else if (key == "obs_size") cfg.obs_size = std::stoi(val);
+        else if (key == "kp") cfg.kp = std::stof(val);
+        else if (key == "kd") cfg.kd = std::stof(val);
         else if (key == "dft_dof_pos") {
             std::cout << "[SDK1]Parseing dft_dof_pos: " << std::endl;
             if (!parse_list<float, 12>(val, cfg.dft_dof_pos))
@@ -78,7 +80,7 @@ SDK2RobotObsConfig SDK2RobotObsConfig::FromFile(const std::string& path, bool* o
     return cfg;
 }
 
-SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double timeout_s, bool auto_stand)
+SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double timeout_s, bool auto_stand, const std::string& config_path)
 {
     std::cout << "[SDK2] ctor iface=" << network_interface
               << " timeout_s=" << timeout_s
@@ -92,8 +94,8 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
     std::cout << "[SDK2] SportClient initialized" << std::endl;
 
     if (auto_stand) {
-        (void)sport_client_->StandUp();
-        std::cout << "[SDK2] Auto StandUp issued" << std::endl;
+        int res = sport_client_->StandUp();
+        std::cout << "[SDK2] Auto StandUp return code: " << res << std::endl;
     }
 
     // 低层发布/订阅初始化
@@ -113,21 +115,19 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
     std::cout << "[SDK2] initLowCmd done" << std::endl;
 
     // Load config
-    const char* home = std::getenv("HOME");
-    std::string cfg_path = std::string(home) + "/.config/legged/sdk2_config.ini";
     bool ok = false;
-    obs_cfg_ = SDK2RobotObsConfig::FromFile(cfg_path, &ok);
-    std::cout << "[SDK1] Load config: " << cfg_path << (ok ? " [OK]" : " [ERR]") << std::endl;
-    // if (ok) {
-    //     std::cout << "[SDK1] dft_dof_pos: " << obs_cfg_.dft_dof_pos << std::endl;
-    //     std::cout << "[SDK1] joint_idx_rob2pol: " << obs_cfg_.joint_idx_rob2pol << std::endl;
-    // }     
+    obs_cfg_ = SDK2PolicyConfig::FromFile(config_path, &ok);
+    std::cout << "[SDK2] Load config: " << config_path << (ok ? " [OK]" : " [ERR]") << std::endl;
 
     // Ensure buffers
     ensureObsBuffers();
     std::cout << "[SDK2] Observation buffers prepared: obs_size=" << obs_cfg_.obs_size
               << " history_steps=" << obs_cfg_.history_steps << std::endl;
     
+    size_t pos = config_path_.find_last_of('/');
+    std::string parent_dir = config_path_.substr(0, pos + 1);
+    std::string onnx_path = parent_dir + obs_cfg_.onnx_model_path;
+    std::cout << "[SDK2] Load onnx_path: " << onnx_path << std::endl;
     // Load ONNX in ctor
     try {
         ort_env_ = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "him_policy");
@@ -135,7 +135,7 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
         opt.SetIntraOpNumThreads(1);
         opt.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
 
-        ort_session_ = std::make_unique<Ort::Session>(*ort_env_, obs_cfg_.onnx_model_path.c_str(), opt);
+        ort_session_ = std::make_unique<Ort::Session>(*ort_env_, onnx_path.c_str(), opt);
 
         // IO names
         Ort::AllocatorWithDefaultOptions allocator;
@@ -238,8 +238,8 @@ void SDK2RobotControl::applyPositionControl(const std::array<double, 12> &joint_
         low_cmd_.motor_cmd()[i].mode() = 0x01; // PMSM 伺服
         low_cmd_.motor_cmd()[i].q()    = static_cast<float>(joint_positions[i]);
         low_cmd_.motor_cmd()[i].dq()   = 0.0f;
-        low_cmd_.motor_cmd()[i].kp()   = Kp_;
-        low_cmd_.motor_cmd()[i].kd()   = Kd_;
+        low_cmd_.motor_cmd()[i].kp()   = obs_cfg_.kp;
+        low_cmd_.motor_cmd()[i].kd()   = obs_cfg_.kd;
         low_cmd_.motor_cmd()[i].tau()  = 0.0f; // 安全起见不叠加力矩
     }
     low_cmd_.crc() = crc32_core(reinterpret_cast<uint32_t*>(&low_cmd_), (sizeof(unitree_go::msg::dds_::LowCmd_) >> 2) - 1);
@@ -289,12 +289,15 @@ void SDK2RobotControl::applyVelCmdControl(double vx, double vy, double wz)
         float* out = outputs[0].GetTensorMutableData<float>();
 
         // 打印 1x12 输出
-        std::cout << "[SDK1] ONNX infer out: ";
-        for (int i = 0; i < 12; ++i) {
-            if (i) std::cout << ", ";
-            std::cout << out[i];
+        static uint64_t policy_cnt = 0;
+        if ((++policy_cnt % 50) == 0) {
+            std::cout << "[SDK1] ONNX infer out: ";
+            for (int i = 0; i < 12; ++i) {
+                if (i) std::cout << ", ";
+                std::cout << out[i];
+            }
+            std::cout << std::endl;
         }
-        std::cout << std::endl;
 
         // 保存原始策略动作（policy 顺序）到 last_act_
         for (int i = 0; i < 12; ++i) {
@@ -316,7 +319,7 @@ void SDK2RobotControl::applyVelCmdControl(double vx, double vy, double wz)
 }
 
 // ---- methods for observations ----
-void SDK2RobotControl::setObsConfig(const SDK2RobotObsConfig& cfg)
+void SDK2RobotControl::setObsConfig(const SDK2PolicyConfig& cfg)
 {
     obs_cfg_ = cfg;
     compute_pol2rob_from_rob2pol(obs_cfg_.joint_idx_rob2pol, obs_cfg_.joint_idx_pol2rgb);
@@ -417,7 +420,7 @@ SDK2RobotObsResult SDK2RobotControl::getRobotObs()
         std::cout << "[SDK2] getRobotObs: obs_size=" << obs_cfg_.obs_size
                   << " history_steps=" << obs_cfg_.history_steps
                   << " motors=" << local.motor_state().size()
-                  << " sample0=" << (res.his_obs.empty() ? 0.0f : res.his_obs[0]) << std::endl;
+                  << std::endl;
     }
     return res;
 }

@@ -23,7 +23,7 @@
 #include <onnxruntime_cxx_api.h>
 
 // ---- Align SDK2 interfaces to SDK1: same config/result names and fields ----
-struct SDK2RobotObsConfig {
+struct SDK2PolicyConfig {
     std::string onnx_model_path = "policy_model.onnx";
     float act_scale = 0.5f;
     float vel_scale = 2.0f;
@@ -31,13 +31,15 @@ struct SDK2RobotObsConfig {
     float dof_pos_scale = 1.0f;
     float dof_vel_scale = 0.05f;
     float obs_clip = 100.0f;
+    float kp = 40.0f; // PD gain
+    float kd = 2.0f;  // PD gain
     std::array<float, 12> dft_dof_pos = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     std::array<int, 12> joint_idx_rob2pol = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
     std::array<int, 12> joint_idx_pol2rgb = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
     std::size_t history_steps = 6; // number of past frames to keep (1 = current only)
     int obs_size = 45;             // 3+3+3+12+12+12
 
-    static SDK2RobotObsConfig FromFile(const std::string& path, bool* ok = nullptr);
+    static SDK2PolicyConfig FromFile(const std::string& path, bool* ok = nullptr);
 };
 
 struct SDK2RobotObsResult {
@@ -50,14 +52,14 @@ class SDK2RobotControl
 public:
     enum class ControlMode { HighLevel = 0, LowLevel = 1 };
 
-    SDK2RobotControl(const std::string &network_interface, double timeout_s, bool auto_stand);
+    SDK2RobotControl(const std::string &network_interface, double timeout_s, bool auto_stand, const std::string& config_path);
     ~SDK2RobotControl();
 
     // Low-level position control interface (auto-switch to LowLevel)
     void applyPositionControl(const std::array<double, 12> &joint_positions);
     void applyVelCmdControl(double vx, double vy, double wz);
 
-    void setObsConfig(const SDK2RobotObsConfig& cfg);
+    void setObsConfig(const SDK2PolicyConfig& cfg);
     SDK2RobotObsResult getRobotObs();
 
     // High-level velocity control interface (auto-switch to HighLevel)
@@ -92,7 +94,8 @@ private:
     float Kp_ = 40.0f;
     float Kd_ = 2.0f;
 
-    SDK2RobotObsConfig obs_cfg_;
+    std::string config_path_;
+    SDK2PolicyConfig obs_cfg_;
     std::vector<float> his_obs_;
     std::array<float, 3> last_cmd_{0.0f, 0.0f, 0.0f};
     std::array<float, 12> last_act_{};

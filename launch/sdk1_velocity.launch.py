@@ -1,10 +1,13 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
-
+from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
+    package_path = get_package_share_directory('unitree_control')
+    config_file_path = PathJoinSubstitution([package_path, 'config', 'sdk1_config.ini'])
+
     target_ip_arg = DeclareLaunchArgument(
         'target_ip', default_value='192.168.123.10',
         description='Target robot IP address for UDP communication')
@@ -43,6 +46,7 @@ def generate_launch_description():
             'max_vx': LaunchConfiguration('max_vx'),
             'max_vy': LaunchConfiguration('max_vy'),
             'max_wz': LaunchConfiguration('max_wz'),
+            'config_path': config_file_path,
         }]
     )
     

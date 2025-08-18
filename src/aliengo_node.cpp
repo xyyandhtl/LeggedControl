@@ -11,7 +11,6 @@ class SDK1ControlNode : public rclcpp::Node
 public:
     SDK1ControlNode()
     : rclcpp::Node("sdk1_position_node"),
-      robot_control_(8081, "192.168.123.220", 8082), // Unified UDP connection
       pos_cmd_time_(this->now()),
       last_vx_(0.0), last_vy_(0.0), last_wz_(0.0),
       cmd_vx_(0.0), cmd_vy_(0.0), cmd_wz_(0.0),
@@ -19,6 +18,10 @@ public:
       sent_stop_(false)
     {
         // Parameters
+        uint16_t local_port = this->declare_parameter<uint16_t>("local_port", 8082);
+        std::string target_ip = this->declare_parameter<std::string>("target_ip", "192.168.123.10");
+        uint16_t tanget_port = this->declare_parameter<uint16_t>("target_port", 8007);
+
         int control_rate_hz = this->declare_parameter<int>("control_rate_hz", 50);
         double stale_timeout_s = this->declare_parameter<double>("stale_timeout_s", 1.0);
 
@@ -27,13 +30,16 @@ public:
         max_wz_ = this->declare_parameter<double>("max_wz", 1.0);
         stale_timeout_s_ = stale_timeout_s;
 
+        std::string config_path = this->declare_parameter<std::string>("config_path", "");
+        robot_control_ = std::make_unique<SDK1RobotControl>(local_port, target_ip, tanget_port, config_path);
+
         // Calculate dt based on control rate
         dt_ = 1.0 / control_rate_hz;
 
         // Subscribe to cmd_pos
         cmd_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
             "/cmd_pos", rclcpp::QoS(10),
-            std::bind(&SDK1ControlNode::onPosition, this, std::placeholders::_1));
+            std::bind(&SDK1ControlNode::onTwist, this, std::placeholders::_1));
 
         // Control timer
         using namespace std::chrono_literals;
@@ -48,7 +54,7 @@ private:
         return std::max(min_val, std::min(max_val, value));
     }
 
-    void onPosition(const geometry_msgs::msg::Twist::SharedPtr msg)
+    void onTwist(const geometry_msgs::msg::Twist::SharedPtr msg)
     {
         cmd_vx_ = clamp(msg->linear.x, -max_vx_, max_vx_);
         cmd_vy_ = clamp(msg->linear.y, -max_vy_, max_vy_);
@@ -59,8 +65,8 @@ private:
 
     void controlLoop()
     {
-        robot_control_.udpRecv(); // Update joystick and robot state
-        const auto key_data = robot_control_.getJoystickData();
+        robot_control_->udpRecv(); // Update joystick and robot state
+        const auto key_data = robot_control_->getJoystickData();
 
         // Process joystick input
         joy_vx_ = key_data.ly * max_vx_;  // ly controls forward/backward velocity
@@ -80,17 +86,17 @@ private:
             last_vx_ = cmd_vx_;
             last_vy_ = cmd_vy_;
             last_wz_ = cmd_wz_;
-            robot_control_.applyVelCmdControl(last_vx_, last_vy_, last_wz_);
+            robot_control_->applyVelCmdControl(last_vx_, last_vy_, last_wz_);
         } else { // Use joystick commands
             last_vx_ = joy_vx_;
             last_vy_ = joy_vy_;
             last_wz_ = joy_wz_;
-            robot_control_.applyVelCmdControl(last_vx_, last_vy_, last_wz_);
+            robot_control_->applyVelCmdControl(last_vx_, last_vy_, last_wz_);
         }
     }
 
 private:
-    SDK1RobotControl robot_control_;
+    std::unique_ptr<SDK1RobotControl> robot_control_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_sub_;
     rclcpp::TimerBase::SharedPtr control_timer_;
 
