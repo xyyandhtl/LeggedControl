@@ -17,7 +17,7 @@ def generate_launch_description():
         description='sport client timeout in seconds')
 
     control_rate_arg = DeclareLaunchArgument(
-        'control_rate_hz', default_value='50',
+        'control_rate_hz', default_value='15',
         description='Control loop rate in Hz')
 
     stale_timeout_arg = DeclareLaunchArgument(

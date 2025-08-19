@@ -10,6 +10,7 @@
 #include <cctype>
 #include <iterator>
 #include "../common/utils.h"
+#include <unitree/common/thread/thread.hpp>
 
 // 常量与示例一致
 static constexpr double PosStopF = (2.146E+9f);
@@ -62,18 +63,18 @@ SDK2PolicyConfig SDK2PolicyConfig::FromFile(const std::string& path, bool* ok) {
             std::cout << "[SDK2]Parseing dft_dof_pos: " << std::endl;
             if (!parse_list<float, 12>(val, cfg.dft_dof_pos))
                 std::cerr << "[SDK2] parse dft_dof_pos failed, expect 12 floats\n";
-        } else if (key == "joint_idx_rob2pol") {
-            std::cout << "[SDK2]Parseing joint_idx_rob2pol: " << std::endl;
-            if (!parse_list<int, 12>(val, cfg.joint_idx_rob2pol))
-                std::cerr << "[SDK2] parse joint_idx_rob2pol failed, expect 12 ints\n";
+        } else if (key == "joint_idx_sdk2policy") {
+            std::cout << "[SDK2]Parseing joint_idx_sdk2policy: " << std::endl;
+            if (!parse_list<int, 12>(val, cfg.joint_idx_sdk2policy))
+                std::cerr << "[SDK2] parse joint_idx_sdk2policy failed, expect 12 ints\n";
         }
     }
     // Compute inverse mapping (do not load from file)
-    compute_pol2rob_from_rob2pol(cfg.joint_idx_rob2pol, cfg.joint_idx_pol2rgb);
-    std::cout << "[SDK2] Computed joint_idx_pol2rgb: ";
+    compute_pol2rob_from_sdk2policy(cfg.joint_idx_sdk2policy, cfg.joint_idx_policy2sdk);
+    std::cout << "[SDK2] Computed joint_idx_policy2sdk: ";
     for (int i = 0; i < 12; ++i) {
         if (i) std::cout << ", ";
-        std::cout << cfg.joint_idx_pol2rgb[i];
+        std::cout << cfg.joint_idx_policy2sdk[i];
     }
     std::cout << std::endl;
 
@@ -164,47 +165,6 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
             std::cout << "[SDK2] ONNX loaded: " << obs_cfg_.onnx_model_path
                       << " input=" << ort_input_names_str_[0]
                       << " output=" << ort_output_names_str_[0] << std::endl;
-
-            // —— Warmup: 一次性推断自检（使用 obs_size*history_steps 的全0输入）——
-            // try {
-            //     const std::size_t frame = static_cast<std::size_t>(obs_cfg_.obs_size);
-            //     const std::size_t total = frame * std::max<std::size_t>(obs_cfg_.history_steps, std::size_t(1));
-            //     std::vector<float> dummy(total, 0.0f);
-
-            //     std::array<int64_t, 2> ishape{1, static_cast<int64_t>(total)};
-            //     Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
-            //     Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-            //         mem, dummy.data(), dummy.size(), ishape.data(), ishape.size());
-
-            //     auto outs = ort_session_->Run(Ort::RunOptions{nullptr},
-            //                                   ort_input_names_.data(), &input_tensor, 1,
-            //                                   ort_output_names_.data(), 1);
-
-            //     if (outs.empty() || !outs[0].IsTensor()) {
-            //         std::cerr << "[SDK2] ONNX warmup failed: empty or non-tensor output" << std::endl;
-            //     } else {
-            //         auto ti = outs[0].GetTensorTypeAndShapeInfo();
-            //         auto out_shape = ti.GetShape();
-            //         std::cout << "[SDK2] ONNX warmup ok. output ndim=" << out_shape.size();
-            //         std::cout << " shape=[";
-            //         for (size_t i = 0; i < out_shape.size(); ++i) {
-            //             if (i) std::cout << ',';
-            //             std::cout << out_shape[i];
-            //         }
-            //         std::cout << "] elem=" << ti.GetElementCount() << std::endl;
-
-            //         // 打印 1x12 输出
-            //         const float* warm_out = outs[0].GetTensorData<float>();
-            //         std::cout << "[SDK2] ONNX warmup output: ";
-            //         for (int i = 0; i < 12; ++i) {
-            //             if (i) std::cout << ", ";
-            //             std::cout << warm_out[i];
-            //         }
-            //         std::cout << std::endl;
-            //     }
-            // } catch (const Ort::Exception& we) {
-            //     std::cerr << "[SDK2] ONNX warmup error: " << we.what() << std::endl;
-            // }
         }
     } catch (const Ort::Exception& e) {
         std::cerr << "[SDK2] ONNX load error: " << e.what()
@@ -212,6 +172,11 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
         ort_session_.reset();
         onnx_ready_ = false;
     }
+
+    // Start control loop thread
+    controlLoopThreadPtr_ = unitree::common::CreateRecurrentThreadEx(
+        "controlLoopThread", UT_CPU_ID_NONE, 20000, &SDK2RobotControl::controlLoop, this);
+    std::cout << "[SDK2] Control loop thread started" << std::endl;
 }
 
 SDK2RobotControl::~SDK2RobotControl()
@@ -222,41 +187,8 @@ SDK2RobotControl::~SDK2RobotControl()
     }
 }
 
-void SDK2RobotControl::applyPositionControl(const std::array<double, 12> &joint_positions)
+void SDK2RobotControl::controlLoop()
 {
-    // 切换到低层
-    setControlMode(ControlMode::LowLevel);
-
-    static uint64_t ap_cnt = 0;
-    if ((++ap_cnt % 50) == 0) {
-        std::cout << "[SDK2] applyPositionControl sample: q0=" << joint_positions[0]
-                  << " q1=" << joint_positions[1]
-                  << " q2=" << joint_positions[2]
-                  << " ... q11=" << joint_positions[11] << std::endl;
-    }
-
-    // 写入目标并由后台循环持续发布
-    std::lock_guard<std::mutex> lk(low_cmd_mtx_);
-    for (int i = 0; i < 12; ++i) {
-        low_cmd_.motor_cmd()[i].mode() = 0x01; // PMSM 伺服
-        low_cmd_.motor_cmd()[i].q()    = static_cast<float>(joint_positions[i]);
-        low_cmd_.motor_cmd()[i].dq()   = 0.0f;
-        low_cmd_.motor_cmd()[i].kp()   = obs_cfg_.kp;
-        low_cmd_.motor_cmd()[i].kd()   = obs_cfg_.kd;
-        low_cmd_.motor_cmd()[i].tau()  = 0.0f; // 安全起见不叠加力矩
-    }
-    low_cmd_.crc() = crc32_core(reinterpret_cast<uint32_t*>(&low_cmd_), (sizeof(unitree_go::msg::dds_::LowCmd_) >> 2) - 1);
-    lowcmd_pub_->Write(low_cmd_);
-    // todo: add go2w wheel control
-}
-
-void SDK2RobotControl::applyVelCmdControl(double vx, double vy, double wz)
-{
-    // Store last velocity command for observations
-    last_cmd_[0] = static_cast<float>(vx);
-    last_cmd_[1] = static_cast<float>(vy);
-    last_cmd_[2] = static_cast<float>(wz);
-
     SDK2RobotObsResult res = getRobotObs();
 
     const int frame = obs_cfg_.obs_size;
@@ -304,14 +236,16 @@ void SDK2RobotControl::applyVelCmdControl(double vx, double vy, double wz)
 
         // 保存原始策略动作（policy 顺序）到 last_act_
         for (int i = 0; i < 12; ++i) {
+            // todo: add act clip
             last_act_[i] = out[i];
         }
 
         // 将策略顺序的动作映射到机器人关节顺序
         std::array<double, 12> joint_positions{};
         for (int r = 0; r < 12; ++r) {
-            int p = obs_cfg_.joint_idx_pol2rgb[r];
-            joint_positions[r] = static_cast<double>(out[p]);
+            int p = obs_cfg_.joint_idx_policy2sdk[r];
+            // todo: add hip_reduction config
+            joint_positions[r] = static_cast<double>(out[p]) * obs_cfg_.act_scale + obs_cfg_.dft_dof_pos[r];
         }
 
         applyPositionControl(joint_positions);
@@ -321,20 +255,71 @@ void SDK2RobotControl::applyVelCmdControl(double vx, double vy, double wz)
     }
 }
 
+void SDK2RobotControl::resetJointPosition()
+{
+    const int steps = 200; // 2 seconds at 10ms intervals
+    const double interval = 0.01; // 10ms
+    std::array<double, 12> current_positions{};
+    std::array<double, 12> target_positions{};
+    
+    // Initialize current and target positions
+    for (int i = 0; i < 12; ++i) {
+        current_positions[i] = low_state_.motor_state()[i].q();
+        target_positions[i] = static_cast<double>(obs_cfg_.dft_dof_pos[i]);
+    }
+
+    for (int step = 0; step <= steps; ++step) {
+        std::array<double, 12> interpolated_positions{};
+        for (int i = 0; i < 12; ++i) {
+            interpolated_positions[i] = current_positions[i] + 
+                (target_positions[i] - current_positions[i]) * (static_cast<double>(step) / steps);
+        }
+        applyPositionControl(interpolated_positions);
+        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(interval * 1000)));
+    }
+}
+
+void SDK2RobotControl::applyPositionControl(const std::array<double, 12> &joint_positions)
+{
+    // 切换到低层
+    setControlMode(ControlMode::LowLevel);
+    // 写入目标并由后台循环持续发布
+    // std::lock_guard<std::mutex> lk(low_cmd_mtx_);
+    for (int i = 0; i < 12; ++i) {
+        low_cmd_.motor_cmd()[i].mode() = 0x01; // PMSM 伺服
+        low_cmd_.motor_cmd()[i].q()    = static_cast<float>(joint_positions[i]);
+        low_cmd_.motor_cmd()[i].dq()   = 0.0f;
+        low_cmd_.motor_cmd()[i].kp()   = obs_cfg_.kp;
+        low_cmd_.motor_cmd()[i].kd()   = obs_cfg_.kd;
+        low_cmd_.motor_cmd()[i].tau()  = 0.0f; // 安全起见不叠加力矩
+    }
+    low_cmd_.crc() = crc32_core(reinterpret_cast<uint32_t*>(&low_cmd_), (sizeof(unitree_go::msg::dds_::LowCmd_) >> 2) - 1);
+    lowcmd_pub_->Write(low_cmd_);
+    // todo: add go2w wheel control
+}
+
+void SDK2RobotControl::applyVelCmdControl(double vx, double vy, double wz)
+{
+    // Store last velocity command for observations
+    last_cmd_[0] = static_cast<float>(vx);
+    last_cmd_[1] = static_cast<float>(vy);
+    last_cmd_[2] = static_cast<float>(wz);
+}
+
 // ---- methods for observations ----
 void SDK2RobotControl::setObsConfig(const SDK2PolicyConfig& cfg)
 {
     obs_cfg_ = cfg;
-    compute_pol2rob_from_rob2pol(obs_cfg_.joint_idx_rob2pol, obs_cfg_.joint_idx_pol2rgb);
+    compute_pol2rob_from_sdk2policy(obs_cfg_.joint_idx_sdk2policy, obs_cfg_.joint_idx_policy2sdk);
     ensureObsBuffers();
 }
 
 SDK2RobotObsResult SDK2RobotControl::getRobotObs()
 {
-    unitree_go::msg::dds_::LowState_ local{};
+    unitree_go::msg::dds_::LowState_ state_copy{};
     {
         std::lock_guard<std::mutex> lk(low_state_mtx_);
-        local = low_state_; // 复制，避免用了不
+        state_copy = low_state_;
     }
 
     // 1) cmd (3)
@@ -346,42 +331,41 @@ SDK2RobotObsResult SDK2RobotControl::getRobotObs()
     // 2) IMU gyr (3) scaled and clipped
     std::array<float, 3> gyr{0, 0, 0};
     for (int i = 0; i < 3; ++i) {
-        float g = local.imu_state().gyroscope()[i];
+        float g = state_copy.imu_state().gyroscope()[i];
         gyr[i] = g * obs_cfg_.gyr_scale;
     }
-    gyr[2] = clip(gyr[2], -0.12f, 0.12f); // temporary IMU clipping
 
     // 3) grav (3) from quaternion (w,x,y,z)
     std::array<float, 4> q{1, 0, 0, 0};
-    if (local.imu_state().quaternion().size() >= 4) {
-        q[0] = local.imu_state().quaternion()[0];
-        q[1] = local.imu_state().quaternion()[1];
-        q[2] = local.imu_state().quaternion()[2];
-        q[3] = local.imu_state().quaternion()[3];
+    if (state_copy.imu_state().quaternion().size() >= 4) {
+        q[0] = state_copy.imu_state().quaternion()[0];
+        q[1] = state_copy.imu_state().quaternion()[1];
+        q[2] = state_copy.imu_state().quaternion()[2];
+        q[3] = state_copy.imu_state().quaternion()[3];
     }
     std::array<float, 3> grav = gravFromQuatWxyz(q);
 
-    // 4) dof pos/vel (12)
-    std::array<float, 12> dof_pos_robot{};
-    std::array<float, 12> dof_vel_robot{};
-    const auto& ms = local.motor_state();
-    const int n = std::min<int>(12, ms.size());
-    for (int i = 0; i < n; ++i) {
-        dof_pos_robot[i] = ms[i].q();
-        dof_vel_robot[i] = ms[i].dq();
+    // 4) dof pos/vel (12) todo: 12 -> 16
+    std::array<float, 12> dof_pos_sdk{};
+    std::array<float, 12> dof_vel_sdk{};
+    const auto& ms = state_copy.motor_state();
+    // const int n = std::min<int>(12, ms.size());
+    for (int i = 0; i < 12; ++i) {
+        dof_pos_sdk[i] = ms[i].q();
+        dof_vel_sdk[i] = ms[i].dq();
     }
     // Subtract default offsets
     for (int i = 0; i < 12; ++i) {
-        dof_pos_robot[i] -= obs_cfg_.dft_dof_pos[i];
+        dof_pos_sdk[i] -= obs_cfg_.dft_dof_pos[i];
     }
-    // Reorder robot->policy using joint_idx_rob2pol
+    // Reorder robot->policy using joint_idx_sdk2policy
     std::array<float, 12> dof_pos{};
     std::array<float, 12> dof_vel{};
     for (int pi = 0; pi < 12; ++pi) {
-        const int ri = obs_cfg_.joint_idx_rob2pol[pi];
+        const int ri = obs_cfg_.joint_idx_sdk2policy[pi];
         // const int ri_clamped = std::clamp(ri, 0, 11);
-        dof_pos[pi] = dof_pos_robot[ri] * obs_cfg_.dof_pos_scale;
-        dof_vel[pi] = dof_vel_robot[ri] * obs_cfg_.dof_vel_scale;
+        dof_pos[pi] = dof_pos_sdk[ri] * obs_cfg_.dof_pos_scale;
+        dof_vel[pi] = dof_vel_sdk[ri] * obs_cfg_.dof_vel_scale;
     }
 
     // 5) act (12) in policy order
@@ -469,6 +453,7 @@ int SDK2RobotControl::stopMove()
     std::cout << "[SDK2] StopMove ret=" << ret << std::endl;
     return ret;
 }
+
 std::array<float, 3> SDK2RobotControl::gravFromQuatWxyz(const std::array<float, 4>& q)
 {
     // Quaternion (w, x, y, z), normalized
@@ -519,10 +504,6 @@ void SDK2RobotControl::onLowStateMessage(const void* msg)
     static uint64_t ls_cnt = 0;
     std::lock_guard<std::mutex> lk(low_state_mtx_);
     low_state_ = *reinterpret_cast<const unitree_go::msg::dds_::LowState_*>(msg);
-    if ((++ls_cnt % 50) == 0) {
-        std::cout << "[SDK2] onLowStateMessage: #" << ls_cnt
-                  << " motors=" << low_state_.motor_state().size() << std::endl;
-    }
 }
 
 int SDK2RobotControl::queryMotionStatus()

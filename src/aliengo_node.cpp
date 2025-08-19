@@ -36,9 +36,9 @@ public:
         // Calculate dt based on control rate
         dt_ = 1.0 / control_rate_hz;
 
-        // Subscribe to cmd_pos
+        // Subscribe to cmd_vel
         cmd_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
-            "/cmd_pos", rclcpp::QoS(10),
+            "/cmd_vel", rclcpp::QoS(10),
             std::bind(&SDK1ControlNode::onTwist, this, std::placeholders::_1));
 
         // Control timer
@@ -67,7 +67,7 @@ private:
 
     void controlLoop()
     {
-        robot_control_->udpRecv(); // Update joystick and robot state
+        // robot_control_->udpRecv(); // Update joystick and robot state
         const auto key_data = robot_control_->getJoystickData();
 
         // Process joystick input

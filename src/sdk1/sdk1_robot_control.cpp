@@ -52,18 +52,18 @@ SDK1PolicyConfig SDK1PolicyConfig::FromFile(const std::string& path, bool* ok) {
             std::cout << "[SDK1]Parseing dft_dof_pos: " << std::endl;
             if (!parse_list<float, 12>(val, cfg.dft_dof_pos))
                 std::cerr << "[SDK1] parse dft_dof_pos failed, expect 12 floats\n";
-        } else if (key == "joint_idx_rob2pol") {
-            std::cout << "[SDK1]Parseing joint_idx_rob2pol: " << std::endl;
-            if (!parse_list<int, 12>(val, cfg.joint_idx_rob2pol))
-                std::cerr << "[SDK1] parse joint_idx_rob2pol failed, expect 12 ints\n";
+        } else if (key == "joint_idx_sdk2policy") {
+            std::cout << "[SDK1]Parseing joint_idx_sdk2policy: " << std::endl;
+            if (!parse_list<int, 12>(val, cfg.joint_idx_sdk2policy))
+                std::cerr << "[SDK1] parse joint_idx_sdk2policy failed, expect 12 ints\n";
         }
     }
     // Compute inverse mapping (do not load from file)
-    compute_pol2rob_from_rob2pol(cfg.joint_idx_rob2pol, cfg.joint_idx_pol2rgb);
-    std::cout << "[SDK1] Computed joint_idx_pol2rgb: ";
+    compute_pol2rob_from_sdk2policy(cfg.joint_idx_sdk2policy, cfg.joint_idx_policy2sdk);
+    std::cout << "[SDK1] Computed joint_idx_policy2sdk: ";
     for (int i = 0; i < 12; ++i) {
         if (i) std::cout << ", ";
-        std::cout << cfg.joint_idx_pol2rgb[i];
+        std::cout << cfg.joint_idx_policy2sdk[i];
     }
     std::cout << std::endl;
 
@@ -75,7 +75,7 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
     : udp_(local_port, target_ip.c_str(), target_port, LOW_CMD_LENGTH, LOW_STATE_LENGTH),
       safe_(LeggedType::Aliengo)
 {
-    std::cout << "[SDK2] local_port=" << local_port
+    std::cout << "[SDK1] local_port=" << local_port
               << " target_ip=" << target_ip
               << " target_port=" << target_port << std::endl;
 
@@ -90,7 +90,7 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
 
     // Ensure buffers
     ensureObsBuffers();
-    std::cout << "[SDK2] Observation buffers prepared: obs_size=" << obs_cfg_.obs_size
+    std::cout << "[SDK1] Observation buffers prepared: obs_size=" << obs_cfg_.obs_size
               << " history_steps=" << obs_cfg_.history_steps << std::endl;
 
     size_t pos = config_path_.find_last_of('/');
@@ -142,8 +142,12 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
         "udp_send", 0.002, 3, boost::bind(&SDK1RobotControl::udpSend, this));
     loop_udpRecv = std::make_unique<LoopFunc>(
         "udp_recv", 0.002, 3, boost::bind(&SDK1RobotControl::udpRecv, this));
+    loop_control = std::make_unique<LoopFunc>(
+        "control_loop", 0.02, 3, boost::bind(&SDK1RobotControl::controlLoop, this));
     loop_udpSend->start();
     loop_udpRecv->start();
+    resetJointPosition();   // todo: wait joystick reset
+    loop_control->start();
 }
 
 SDK1RobotControl::~SDK1RobotControl()
@@ -156,36 +160,20 @@ SDK1RobotControl::~SDK1RobotControl()
         loop_udpRecv->shutdown();
         loop_udpRecv.reset();
     }
+    if (loop_control) {
+        loop_control->shutdown();
+        loop_control.reset();
+    }
     std::cout << "[SDK1] dtor: stopping..." << std::endl;
 }
 
-void SDK1RobotControl::applyPositionControl(const std::array<double, 12> &joint_positions)
+void SDK1RobotControl::controlLoop()
 {
-    // 下发时再乘以 act_scale
-    for (int i = 0; i < 12; i++) {
-        cmd_.motorCmd[i].q  = joint_positions[i];
-        cmd_.motorCmd[i].dq = 0.0;
-        cmd_.motorCmd[i].Kp = obs_cfg_.kp;
-        cmd_.motorCmd[i].Kd = obs_cfg_.kd;
-        cmd_.motorCmd[i].tau = 0.0f;
+    {
+        std::lock_guard<std::mutex> lk(low_state_mtx_);
+        udp_.GetRecv(state_);
+        std::memcpy(&key_data_, &state_.wirelessRemote, sizeof(xRockerBtnDataStruct)); // Update joystick data
     }
-
-    // Gravity compensation
-    cmd_.motorCmd[FR_0].tau = -1.6f;
-    cmd_.motorCmd[FL_0].tau = -1.6f;
-    cmd_.motorCmd[RR_0].tau = -1.6f;
-    cmd_.motorCmd[RL_0].tau = -1.6f;
-
-    udp_.SetSend(cmd_);
-}
-
-void SDK1RobotControl::applyVelCmdControl(double vx, double vy, double wz)
-{
-    // Store last velocity command for observations
-    last_cmd_[0] = static_cast<float>(vx);
-    last_cmd_[1] = static_cast<float>(vy);
-    last_cmd_[2] = static_cast<float>(wz);
-
     SDK1RobotObsResult res = getRobotObs();
 
     const int frame = obs_cfg_.obs_size;
@@ -233,14 +221,16 @@ void SDK1RobotControl::applyVelCmdControl(double vx, double vy, double wz)
 
         // 保存原始策略动作（policy 顺序）到 last_act_
         for (int i = 0; i < 12; ++i) {
+            // todo: add act clip
             last_act_[i] = out[i];
         }
 
         // 将策略顺序的动作映射到机器人关节顺序
         std::array<double, 12> joint_positions{};
         for (int r = 0; r < 12; ++r) {
-            int p = obs_cfg_.joint_idx_pol2rgb[r];
-            joint_positions[r] = static_cast<double>(out[p]);
+            int p = obs_cfg_.joint_idx_policy2sdk[r];
+            // todo: add hip_reduction config
+            joint_positions[r] = static_cast<double>(out[p]) * obs_cfg_.act_scale + obs_cfg_.dft_dof_pos[r];
         }
 
         applyPositionControl(joint_positions);
@@ -250,16 +240,73 @@ void SDK1RobotControl::applyVelCmdControl(double vx, double vy, double wz)
     }
 }
 
+void SDK1RobotControl::resetJointPosition()
+{
+    const int steps = 200; // 2 seconds at 10ms intervals
+    const double interval = 0.01; // 10ms
+    std::array<double, 12> current_positions{};
+    std::array<double, 12> target_positions{};
+    udp_.GetRecv(state_);
+
+    // Initialize current and target positions
+    for (int i = 0; i < 12; ++i) {
+        current_positions[i] = state_.motorState[i].q;
+        target_positions[i] = static_cast<double>(obs_cfg_.dft_dof_pos[i]);
+    }
+
+    for (int step = 0; step <= steps; ++step) {
+        std::array<double, 12> interpolated_positions{};
+        for (int i = 0; i < 12; ++i) {
+            interpolated_positions[i] = current_positions[i] + 
+                (target_positions[i] - current_positions[i]) * (static_cast<double>(step) / steps);
+        }
+        applyPositionControl(interpolated_positions);
+        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(interval * 1000)));
+    }
+}
+
+void SDK1RobotControl::applyPositionControl(const std::array<double, 12> &joint_positions)
+{
+    // std::lock_guard<std::mutex> lk(low_cmd_mtx_); // seems no need to lock
+    for (int i = 0; i < 12; i++) {
+        cmd_.motorCmd[i].q  = joint_positions[i];
+        cmd_.motorCmd[i].dq = 0.0;
+        cmd_.motorCmd[i].Kp = obs_cfg_.kp;
+        cmd_.motorCmd[i].Kd = obs_cfg_.kd;
+        cmd_.motorCmd[i].tau = 0.0f;
+    }
+    // Gravity compensation
+    cmd_.motorCmd[FR_0].tau = -1.6f;
+    cmd_.motorCmd[FL_0].tau = -1.6f;
+    cmd_.motorCmd[RR_0].tau = -1.6f;
+    cmd_.motorCmd[RL_0].tau = -1.6f;
+
+    udp_.SetSend(cmd_);
+}
+
+void SDK1RobotControl::applyVelCmdControl(double vx, double vy, double wz)
+{
+    // Store last velocity command for observations
+    last_cmd_[0] = static_cast<float>(vx);
+    last_cmd_[1] = static_cast<float>(vy);
+    last_cmd_[2] = static_cast<float>(wz);
+}
+
 // ---- methods for observations ----
 void SDK1RobotControl::setObsConfig(const SDK1PolicyConfig& cfg)
 {
     obs_cfg_ = cfg;
-    compute_pol2rob_from_rob2pol(obs_cfg_.joint_idx_rob2pol, obs_cfg_.joint_idx_pol2rgb);
+    compute_pol2rob_from_sdk2policy(obs_cfg_.joint_idx_sdk2policy, obs_cfg_.joint_idx_policy2sdk);
     ensureObsBuffers();
 }
 
 SDK1RobotObsResult SDK1RobotControl::getRobotObs()
 {
+    LowState state_copy = {0};
+    {
+        std::lock_guard<std::mutex> lk(low_state_mtx_);
+        state_copy = state_;
+    }
     // 1) cmd (3)
     std::array<float, 3> cmd_scaled = last_cmd_;
     cmd_scaled[0] *= obs_cfg_.vel_scale;
@@ -267,34 +314,34 @@ SDK1RobotObsResult SDK1RobotControl::getRobotObs()
     cmd_scaled[2] *= obs_cfg_.gyr_scale;
 
     // 2) IMU gyr (3) scaled and clipped
-    std::array<float, 3> gyr = state_.imu.gyroscope;
+    std::array<float, 3> gyr = state_copy.imu.gyroscope;
     for (int i = 0; i < 3; ++i) {
         gyr[i] *= obs_cfg_.gyr_scale;
     }
-    gyr[2] = clip(gyr[2], -0.12f, 0.12f); // temporary IMU clipping
+    // gyr[2] = clip(gyr[2], -0.12f, 0.12f); // temporary IMU clipping
 
     // 3) grav (3) from quaternion (w,x,y,z)
-    std::array<float, 3> grav = gravFromQuatWxyz(state_.imu.quaternion);
+    std::array<float, 3> grav = gravFromQuatWxyz(state_copy.imu.quaternion);
 
     // 4) dof_pos (12)
-    std::array<float, 12> dof_pos_robot{};
-    std::array<float, 12> dof_vel_robot{};
+    std::array<float, 12> dof_pos_sdk{};
+    std::array<float, 12> dof_vel_sdk{};
     for (int i = 0; i < 12; ++i) {
-        dof_pos_robot[i] = static_cast<float>(state_.motorState[i].q);
-        dof_vel_robot[i] = static_cast<float>(state_.motorState[i].dq);
+        dof_pos_sdk[i] = static_cast<float>(state_copy.motorState[i].q);
+        dof_vel_sdk[i] = static_cast<float>(state_copy.motorState[i].dq);
     }
     // Subtract default offsets
     for (int i = 0; i < 12; ++i) {
-        dof_pos_robot[i] -= obs_cfg_.dft_dof_pos[i];
+        dof_pos_sdk[i] -= obs_cfg_.dft_dof_pos[i];
     }
-    // Reorder robot->policy using joint_idx_rob2pol
+    // Reorder robot->policy using joint_idx_sdk2policy
     std::array<float, 12> dof_pos{};
     std::array<float, 12> dof_vel{};
     for (int pi = 0; pi < 12; ++pi) {
-        const int ri = obs_cfg_.joint_idx_rob2pol[pi];
+        const int ri = obs_cfg_.joint_idx_sdk2policy[pi];
         // const int ri_clamped = std::clamp(ri, 0, 11);
-        dof_pos[pi] = dof_pos_robot[ri] * obs_cfg_.dof_pos_scale;
-        dof_vel[pi] = dof_vel_robot[ri] * obs_cfg_.dof_vel_scale;
+        dof_pos[pi] = dof_pos_sdk[ri] * obs_cfg_.dof_pos_scale;
+        dof_vel[pi] = dof_vel_sdk[ri] * obs_cfg_.dof_vel_scale;
     }
 
     // 5) act (12) in policy order
@@ -342,8 +389,8 @@ SDK1RobotObsResult SDK1RobotControl::getRobotObs()
 void SDK1RobotControl::udpRecv()
 {
     udp_.Recv();
-    udp_.GetRecv(state_);
-    std::memcpy(&key_data_, &state_.wirelessRemote, sizeof(xRockerBtnDataStruct)); // Update joystick data
+    // udp_.GetRecv(state_);
+    // std::memcpy(&key_data_, &state_.wirelessRemote, sizeof(xRockerBtnDataStruct)); // Update joystick data
 }
 
 void SDK1RobotControl::udpSend()
@@ -389,7 +436,7 @@ void SDK1RobotControl::ensureObsBuffers()
     // obs_cfg_.obs_size = obs_size;
     const std::size_t total = static_cast<std::size_t>(obs_cfg_.obs_size) * std::max<std::size_t>(obs_cfg_.history_steps, 1);
     his_obs_.assign(total, 0.0f);
-    std::cout << "[SDK2] ensureObsBuffers: obs_size=" << total
+    std::cout << "[SDK1] ensureObsBuffers: obs_size=" << total
               << " history_steps=" << obs_cfg_.history_steps
               << " total=" << total << std::endl;
 }

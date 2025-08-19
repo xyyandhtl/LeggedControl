@@ -33,8 +33,8 @@ struct SDK2PolicyConfig {
     float kp = 40.0f; // PD gain
     float kd = 2.0f;  // PD gain
     std::array<float, 12> dft_dof_pos = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<int, 12> joint_idx_rob2pol = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
-    std::array<int, 12> joint_idx_pol2rgb = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+    std::array<int, 12> joint_idx_sdk2policy = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+    std::array<int, 12> joint_idx_policy2sdk = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
     std::size_t history_steps = 6; // number of past frames to keep (1 = current only)
     int obs_size = 45;             // 3+3+3+12+12+12
 
@@ -55,6 +55,8 @@ public:
     ~SDK2RobotControl();
 
     // Low-level position control interface (auto-switch to LowLevel)
+    void controlLoop();
+    void resetJointPosition();
     void applyPositionControl(const std::array<double, 12> &joint_positions);
     void applyVelCmdControl(double vx, double vy, double wz);
 
@@ -81,10 +83,12 @@ private:
     unitree_go::msg::dds_::LowCmd_ low_cmd_{};
     unitree_go::msg::dds_::LowState_ low_state_{};
     std::mutex low_state_mtx_;
-    std::mutex low_cmd_mtx_;
+    // std::mutex low_cmd_mtx_;
 
     // High-level client
     std::unique_ptr<unitree::robot::go2::SportClient> sport_client_;
+    // Low-level control loop thread
+    unitree::common::ThreadPtr controlLoopThreadPtr_;
 
     // Motion switcher (release mode when entering LowLevel)
     std::unique_ptr<unitree::robot::b2::MotionSwitcherClient> msc_;

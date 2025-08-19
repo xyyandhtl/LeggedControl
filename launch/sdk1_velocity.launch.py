@@ -21,7 +21,7 @@ def generate_launch_description():
         description='Local port for UDP communication')
     
     control_rate_arg = DeclareLaunchArgument(
-        'control_rate_hz', default_value='50',
+        'control_rate_hz', default_value='15',
         description='Control loop rate in Hz (50Hz for policy control)')
     
     stale_timeout_arg = DeclareLaunchArgument(

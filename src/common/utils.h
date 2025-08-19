@@ -38,15 +38,15 @@ inline bool parse_list(const std::string& v, std::array<T, N>& out) {
 
 // Compute inverse mapping (robot index -> policy index) from policy->robot array
 template <std::size_t N>
-inline void compute_pol2rob_from_rob2pol(const std::array<int, N>& rob2pol,
+inline void compute_pol2rob_from_sdk2policy(const std::array<int, N>& sdk2policy,
                                          std::array<int, N>& pol2rob) {
     for (std::size_t i = 0; i < N; ++i) pol2rob[i] = static_cast<int>(i);
     for (std::size_t pi = 0; pi < N; ++pi) {
-        int ri = rob2pol[pi];
+        int ri = sdk2policy[pi];
         if (ri >= 0 && ri < static_cast<int>(N)) {
             pol2rob[ri] = static_cast<int>(pi);
         } else {
-            std::cerr << "[SDK-UTILS] joint index out of range in joint_idx_rob2pol at pi="
+            std::cerr << "[SDK-UTILS] joint index out of range in joint_idx_sdk2policy at pi="
                       << pi << " val=" << ri << " (keeping identity)\n";
         }
     }

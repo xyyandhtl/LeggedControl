@@ -4,6 +4,7 @@
 #include <string>
 #include <array>
 #include <vector>
+#include <mutex>
 
 #include "unitree_legged_sdk/unitree_legged_sdk.h"
 #include "unitree_legged_sdk/unitree_joystick.h"
@@ -23,8 +24,8 @@ struct SDK1PolicyConfig {
     float kp = 40.0f; // PD gain
     float kd = 2.0f;  // PD gain
     std::array<float, 12> dft_dof_pos = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<int, 12> joint_idx_rob2pol = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
-    std::array<int, 12> joint_idx_pol2rgb = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+    std::array<int, 12> joint_idx_sdk2policy = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+    std::array<int, 12> joint_idx_policy2sdk = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
     std::size_t history_steps = 6; // number of past frames to keep (1 = current only)
     int obs_size = 45;             // 3+3+3+12+12+12
 
@@ -43,6 +44,8 @@ public:
     ~SDK1RobotControl();
     
     // Low-level position control interface (auto-switch to LowLevel)
+    void controlLoop();
+    void resetJointPosition();
     void applyPositionControl(const std::array<double, 12> &joint_positions);
     void applyVelCmdControl(double vx, double vy, double wz);
 
@@ -82,7 +85,10 @@ private:
 
     std::unique_ptr<LoopFunc> loop_udpSend;
     std::unique_ptr<LoopFunc> loop_udpRecv;
-    
+    std::unique_ptr<LoopFunc> loop_control;
+    std::mutex low_state_mtx_;
+    // std::mutex low_cmd_mtx_;
+
     void ensureObsBuffers();
     static std::array<float, 3> gravFromQuatWxyz(const std::array<float, 4>& q_wxyz);
     static inline float clip(float v, float lo, float hi) {
