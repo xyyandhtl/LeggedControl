@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <cctype>
+#include <iterator>
 #include "../common/utils.h"
 
 // 常量与示例一致
@@ -58,18 +59,18 @@ SDK2PolicyConfig SDK2PolicyConfig::FromFile(const std::string& path, bool* ok) {
         else if (key == "kp") cfg.kp = std::stof(val);
         else if (key == "kd") cfg.kd = std::stof(val);
         else if (key == "dft_dof_pos") {
-            std::cout << "[SDK1]Parseing dft_dof_pos: " << std::endl;
+            std::cout << "[SDK2]Parseing dft_dof_pos: " << std::endl;
             if (!parse_list<float, 12>(val, cfg.dft_dof_pos))
-                std::cerr << "[SDK1] parse dft_dof_pos failed, expect 12 floats\n";
+                std::cerr << "[SDK2] parse dft_dof_pos failed, expect 12 floats\n";
         } else if (key == "joint_idx_rob2pol") {
-            std::cout << "[SDK1]Parseing joint_idx_rob2pol: " << std::endl;
+            std::cout << "[SDK2]Parseing joint_idx_rob2pol: " << std::endl;
             if (!parse_list<int, 12>(val, cfg.joint_idx_rob2pol))
-                std::cerr << "[SDK1] parse joint_idx_rob2pol failed, expect 12 ints\n";
+                std::cerr << "[SDK2] parse joint_idx_rob2pol failed, expect 12 ints\n";
         }
     }
     // Compute inverse mapping (do not load from file)
     compute_pol2rob_from_rob2pol(cfg.joint_idx_rob2pol, cfg.joint_idx_pol2rgb);
-    std::cout << "[SDK1] Computed joint_idx_pol2rgb: ";
+    std::cout << "[SDK2] Computed joint_idx_pol2rgb: ";
     for (int i = 0; i < 12; ++i) {
         if (i) std::cout << ", ";
         std::cout << cfg.joint_idx_pol2rgb[i];
@@ -106,15 +107,17 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
     lowstate_sub_.reset(new ChannelSubscriber<unitree_go::msg::dds_::LowState_>(TOPIC_LOWSTATE));
     lowstate_sub_->InitChannel(std::bind(&SDK2RobotControl::onLowStateMessage, this, std::placeholders::_1), 1);
 
-    // // 不在构造函数中释放高层模式，默认以 HighLevel 启动，便于调用 SportClient
-    // msc_.SetTimeout(static_cast<float>(timeout_s));
-    // msc_.Init();
+    // 不在构造函数中释放高层模式，默认以 HighLevel 启动，便于调用 SportClient  // todo: fix this bug
+    msc_ = std::make_unique<unitree::robot::b2::MotionSwitcherClient>();
+    msc_->SetTimeout(static_cast<float>(timeout_s));
+    msc_->Init();
 
     // // 初始化低层命令
     initLowCmd();
     std::cout << "[SDK2] initLowCmd done" << std::endl;
 
     // Load config
+    config_path_ = config_path;
     bool ok = false;
     obs_cfg_ = SDK2PolicyConfig::FromFile(config_path, &ok);
     std::cout << "[SDK2] Load config: " << config_path << (ok ? " [OK]" : " [ERR]") << std::endl;
@@ -142,7 +145,7 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
         const size_t in_count = ort_session_->GetInputCount();
         const size_t out_count = ort_session_->GetOutputCount();
         if (in_count == 0 || out_count == 0) {
-            std::cerr << "[SDK1] ONNX: invalid IO count (in=" << in_count
+            std::cerr << "[SDK2] ONNX: invalid IO count (in=" << in_count
                       << ", out=" << out_count << ")" << std::endl;
             ort_session_.reset();
             onnx_ready_ = false;
@@ -158,7 +161,7 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
             ort_input_names_  = { ort_input_names_str_[0].c_str() };
             ort_output_names_ = { ort_output_names_str_[0].c_str() };
             onnx_ready_ = true;
-            std::cout << "[SDK1] ONNX loaded: " << obs_cfg_.onnx_model_path
+            std::cout << "[SDK2] ONNX loaded: " << obs_cfg_.onnx_model_path
                       << " input=" << ort_input_names_str_[0]
                       << " output=" << ort_output_names_str_[0] << std::endl;
 
@@ -178,11 +181,11 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
             //                                   ort_output_names_.data(), 1);
 
             //     if (outs.empty() || !outs[0].IsTensor()) {
-            //         std::cerr << "[SDK1] ONNX warmup failed: empty or non-tensor output" << std::endl;
+            //         std::cerr << "[SDK2] ONNX warmup failed: empty or non-tensor output" << std::endl;
             //     } else {
             //         auto ti = outs[0].GetTensorTypeAndShapeInfo();
             //         auto out_shape = ti.GetShape();
-            //         std::cout << "[SDK1] ONNX warmup ok. output ndim=" << out_shape.size();
+            //         std::cout << "[SDK2] ONNX warmup ok. output ndim=" << out_shape.size();
             //         std::cout << " shape=[";
             //         for (size_t i = 0; i < out_shape.size(); ++i) {
             //             if (i) std::cout << ',';
@@ -192,7 +195,7 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
 
             //         // 打印 1x12 输出
             //         const float* warm_out = outs[0].GetTensorData<float>();
-            //         std::cout << "[SDK1] ONNX warmup output: ";
+            //         std::cout << "[SDK2] ONNX warmup output: ";
             //         for (int i = 0; i < 12; ++i) {
             //             if (i) std::cout << ", ";
             //             std::cout << warm_out[i];
@@ -200,11 +203,11 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
             //         std::cout << std::endl;
             //     }
             // } catch (const Ort::Exception& we) {
-            //     std::cerr << "[SDK1] ONNX warmup error: " << we.what() << std::endl;
+            //     std::cerr << "[SDK2] ONNX warmup error: " << we.what() << std::endl;
             // }
         }
     } catch (const Ort::Exception& e) {
-        std::cerr << "[SDK1] ONNX load error: " << e.what()
+        std::cerr << "[SDK2] ONNX load error: " << e.what()
                   << " path=" << obs_cfg_.onnx_model_path << std::endl;
         ort_session_.reset();
         onnx_ready_ = false;
@@ -259,12 +262,12 @@ void SDK2RobotControl::applyVelCmdControl(double vx, double vy, double wz)
     const int frame = obs_cfg_.obs_size;
     const std::size_t total = static_cast<std::size_t>(frame) * std::max<std::size_t>(obs_cfg_.history_steps, std::size_t(1));
     if (res.his_obs.size() < total) {
-        std::cerr << "[SDK1] ONNX infer: his_obs size too small: " << res.his_obs.size()
+        std::cerr << "[SDK2] ONNX infer: his_obs size too small: " << res.his_obs.size()
                   << " < " << total << std::endl;
         return;
     }
     if (!onnx_ready_ || !ort_session_) {
-        std::cerr << "[SDK1] ONNX infer: session not ready." << std::endl;
+        std::cerr << "[SDK2] ONNX infer: session not ready." << std::endl;
         return;
     }
 
@@ -282,7 +285,7 @@ void SDK2RobotControl::applyVelCmdControl(double vx, double vy, double wz)
                                          ort_output_names_.data(), 1);
 
         if (outputs.empty() || !outputs[0].IsTensor()) {
-            std::cerr << "[SDK1] ONNX infer: empty or non-tensor output" << std::endl;
+            std::cerr << "[SDK2] ONNX infer: empty or non-tensor output" << std::endl;
             return;
         }
 
@@ -291,7 +294,7 @@ void SDK2RobotControl::applyVelCmdControl(double vx, double vy, double wz)
         // 打印 1x12 输出
         static uint64_t policy_cnt = 0;
         if ((++policy_cnt % 50) == 0) {
-            std::cout << "[SDK1] ONNX infer out: ";
+            std::cout << "[SDK2] ONNX infer out: ";
             for (int i = 0; i < 12; ++i) {
                 if (i) std::cout << ", ";
                 std::cout << out[i];
@@ -313,7 +316,7 @@ void SDK2RobotControl::applyVelCmdControl(double vx, double vy, double wz)
 
         applyPositionControl(joint_positions);
     } catch (const Ort::Exception& e) {
-        std::cerr << "[SDK1] ONNX runtime error: " << e.what() << std::endl;
+        std::cerr << "[SDK2] ONNX runtime error: " << e.what() << std::endl;
         return;
     }
 }
@@ -331,7 +334,7 @@ SDK2RobotObsResult SDK2RobotControl::getRobotObs()
     unitree_go::msg::dds_::LowState_ local{};
     {
         std::lock_guard<std::mutex> lk(low_state_mtx_);
-        local = low_state_; // 复制，避免竞争
+        local = low_state_; // 复制，避免用了不
     }
 
     // 1) cmd (3)
@@ -417,10 +420,8 @@ SDK2RobotObsResult SDK2RobotControl::getRobotObs()
 
     static uint64_t obs_cnt = 0;
     if ((++obs_cnt % 50) == 0) {
-        std::cout << "[SDK2] getRobotObs: obs_size=" << obs_cfg_.obs_size
-                  << " history_steps=" << obs_cfg_.history_steps
-                  << " motors=" << local.motor_state().size()
-                  << std::endl;
+        std::copy(obs.begin(), obs.end(), std::ostream_iterator<float>(std::cout, " "));
+        std::cout << std::endl;
     }
     return res;
 }
@@ -471,16 +472,16 @@ int SDK2RobotControl::stopMove()
 std::array<float, 3> SDK2RobotControl::gravFromQuatWxyz(const std::array<float, 4>& q)
 {
     // Quaternion (w, x, y, z), normalized
-    const float w = q[0], x = q[1], y = q[2], z = q[3];
+    const float w = q[0], x = -q[1], y = -q[2], z = -q[3];
 
     // Rotation matrix (body->world). Gravity in world is [0,0,-1].
     // g_body = R^T * [0,0,-1] = - third column of R
-    const float c0 = 2.0f * (x * z - w * y);
-    const float c1 = 2.0f * (y * z + w * x);
-    const float c2 = 1.0f - 2.0f * (x * x + y * y);
+    const float c0 = -2.0f * (x * z + w * y);
+    const float c1 = -2.0f * (y * z - w * x);
+    const float c2 = -(w * w - x * x - y * y + z * z);
 
     // Negative of third column
-    return std::array<float, 3>{-c0, -c1, -c2};
+    return std::array<float, 3>{c0, c1, c2};
 }
 
 void SDK2RobotControl::ensureObsBuffers()
@@ -524,9 +525,55 @@ void SDK2RobotControl::onLowStateMessage(const void* msg)
     }
 }
 
-void SDK2RobotControl::releaseMotionModeIfNeeded()
+int SDK2RobotControl::queryMotionStatus()
 {
-    std::cout << "[SDK2] releaseMotionModeIfNeeded: no-op" << std::endl;
+    std::string robotForm,motionName;
+    int motionStatus;
+    int32_t ret = msc_->CheckMode(robotForm,motionName);
+    if (ret == 0) {
+        std::cout << "CheckMode succeeded." << std::endl;
+    } else {
+        std::cout << "CheckMode failed. Error code: " << ret << std::endl;
+    }
+    if(motionName.empty())
+    {
+        std::cout << "The motion control-related service is deactivated." << std::endl;
+        motionStatus = 0;
+    }
+    else
+    {
+        std::string serviceName = "";
+        if(robotForm == "0")
+        {
+            if(motionName == "normal" ) serviceName = "sport_mode"; 
+            if(motionName == "ai" ) serviceName = "ai_sport"; 
+            if(motionName == "advanced" ) serviceName = "advanced_sport"; 
+        }
+        else
+        {
+            if(motionName == "ai-w" ) serviceName = "wheeled_sport(go2W)"; 
+            if(motionName == "normal-w" ) serviceName = "wheeled_sport(b2W)";
+        }
+        std::cout << "Service: "<< serviceName<< " is activate" << std::endl;
+        motionStatus = 1;
+    }
+    return motionStatus;
+}
+
+void SDK2RobotControl::releaseMotionModeIfNeeded()
+{   
+    while(queryMotionStatus())
+    {
+        std::cout << "Try to deactivate the motion control-related service." << std::endl;
+        int32_t ret = msc_->ReleaseMode(); 
+        if (ret == 0) {
+            std::cout << "ReleaseMode succeeded." << std::endl;
+        } else {
+            std::cout << "ReleaseMode failed. Error code: " << ret << std::endl;
+        }
+        sleep(5);
+    }
+    std::cout << "[SDK2] releaseMotionModeIfNeeded: ok" << std::endl;
 }
 
 uint32_t SDK2RobotControl::crc32_core(uint32_t* ptr, uint32_t len)

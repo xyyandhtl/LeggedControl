@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <cctype>
+#include <iterator>
 #include <onnxruntime_cxx_api.h>
 #include "../common/utils.h"
 
@@ -136,10 +137,25 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
         ort_session_.reset();
         onnx_ready_ = false;
     }
+
+    loop_udpSend = std::make_unique<LoopFunc>(
+        "udp_send", 0.002, 3, boost::bind(&SDK1RobotControl::udpSend, this));
+    loop_udpRecv = std::make_unique<LoopFunc>(
+        "udp_recv", 0.002, 3, boost::bind(&SDK1RobotControl::udpRecv, this));
+    loop_udpSend->start();
+    loop_udpRecv->start();
 }
 
 SDK1RobotControl::~SDK1RobotControl()
 {
+    if (loop_udpSend) {
+        loop_udpSend->shutdown();
+        loop_udpSend.reset();
+    }
+    if (loop_udpRecv) {
+        loop_udpRecv->shutdown();
+        loop_udpRecv.reset();
+    }
     std::cout << "[SDK1] dtor: stopping..." << std::endl;
 }
 
@@ -317,10 +333,8 @@ SDK1RobotObsResult SDK1RobotControl::getRobotObs()
     
     static uint64_t obs_cnt = 0;
     if ((++obs_cnt % 50) == 0) {
-        std::cout << "[SDK2] getRobotObs: obs_size=" << obs_cfg_.obs_size
-                  << " history_steps=" << obs_cfg_.history_steps
-                  << " motors=" << state_.motorState.size()
-                  << std::endl;
+        std::copy(obs.begin(), obs.end(), std::ostream_iterator<float>(std::cout, " "));
+        std::cout << std::endl;
     }
     return res;
 }
@@ -357,16 +371,16 @@ xRockerBtnDataStruct SDK1RobotControl::getJoystickData() const
 std::array<float, 3> SDK1RobotControl::gravFromQuatWxyz(const std::array<float, 4>& q)
 {
     // Quaternion (w, x, y, z), normalized
-    const float w = q[0], x = q[1], y = q[2], z = q[3];
+    const float w = q[0], x = -q[1], y = -q[2], z = -q[3];
 
     // Rotation matrix (body->world). Gravity in world is [0,0,-1].
     // g_body = R^T * [0,0,-1] = - third column of R
-    const float c0 = 2.0f * (x * z - w * y);
-    const float c1 = 2.0f * (y * z + w * x);
-    const float c2 = 1.0f - 2.0f * (x * x + y * y);
+    const float c0 = -2.0f * (x * z + w * y);
+    const float c1 = -2.0f * (y * z - w * x);
+    const float c2 = -(w * w - x * x - y * y + z * z);
 
     // Negative of third column
-    return std::array<float, 3>{-c0, -c1, -c2};
+    return std::array<float, 3>{c0, c1, c2};
 }
 
 void SDK1RobotControl::ensureObsBuffers()

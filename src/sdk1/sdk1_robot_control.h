@@ -80,6 +80,9 @@ private:
     std::vector<const char*> ort_output_names_;
     bool onnx_ready_ = false;
 
+    std::unique_ptr<LoopFunc> loop_udpSend;
+    std::unique_ptr<LoopFunc> loop_udpRecv;
+    
     void ensureObsBuffers();
     static std::array<float, 3> gravFromQuatWxyz(const std::array<float, 4>& q_wxyz);
     static inline float clip(float v, float lo, float hi) {

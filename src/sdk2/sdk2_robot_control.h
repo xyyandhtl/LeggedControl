@@ -18,8 +18,7 @@
 #include <unitree/idl/go2/LowState_.hpp>
 #include <unitree/idl/go2/LowCmd_.hpp>
 #include <unitree/robot/go2/sport/sport_client.hpp>
-// #include <unitree/robot/b2/motion_switcher/motion_switcher_client.hpp>
-// #include <unitree/robot/b2/motion_switcher/motion_switcher_client.hpp>
+#include <unitree/robot/b2/motion_switcher/motion_switcher_client.hpp>
 #include <onnxruntime_cxx_api.h>
 
 // ---- Align SDK2 interfaces to SDK1: same config/result names and fields ----
@@ -88,7 +87,7 @@ private:
     std::unique_ptr<unitree::robot::go2::SportClient> sport_client_;
 
     // Motion switcher (release mode when entering LowLevel)
-    // unitree::robot::b2::MotionSwitcherClient msc_;
+    std::unique_ptr<unitree::robot::b2::MotionSwitcherClient> msc_;
 
     // PD gains (align with sdk1)
     float Kp_ = 40.0f;
@@ -116,6 +115,8 @@ private:
 
 private:
     void onLowStateMessage(const void* msg);
+
+    int queryMotionStatus();
     void releaseMotionModeIfNeeded();
 
     void initLowCmd();

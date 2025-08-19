@@ -32,12 +32,14 @@ public:
 
         std::string config_path = this->declare_parameter<std::string>("config_path", "");
         robot_control_ = std::make_unique<SDK2RobotControl>(network_interface, timeout_s, auto_stand, config_path);
-
+        
+        // Subscribe to cmd_pos
         cmd_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
             "/cmd_vel", rclcpp::QoS(10),
             std::bind(&VelocityNode::onTwist, this, std::placeholders::_1));
 
-        using namespace std::chrono_literals;
+        // Control timer
+            using namespace std::chrono_literals;
         auto period = std::chrono::microseconds(static_cast<int64_t>(1'000'000 / std::max(1, control_rate_hz)));
         control_timer_ = this->create_wall_timer(
             period, std::bind(&VelocityNode::controlLoop, this));
@@ -73,6 +75,7 @@ private:
                     RCLCPP_WARN(get_logger(), "Move failed rc=%d", rc);
                 }
             } else {
+                RCLCPP_INFO(get_logger(), "Applying velocity command: vx=%.2f, vy=%.2f, wz=%.2f", last_vx_, last_vy_, last_wz_);
                 robot_control_->applyVelCmdControl(last_vx_, last_vy_, last_wz_);
             }
         } else {
@@ -82,6 +85,7 @@ private:
                 RCLCPP_INFO(get_logger(), "StopMove rc=%d (cmd stale for %.2fs)", rc, dt);
                 sent_stop_ = true;
                 last_vx_ = last_vy_ = last_wz_ = 0.0;
+                // robot_control_->applyVelCmdControl(last_vx_, last_vy_, last_wz_);
             }
         }
     }

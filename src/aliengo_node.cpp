@@ -11,7 +11,7 @@ class SDK1ControlNode : public rclcpp::Node
 public:
     SDK1ControlNode()
     : rclcpp::Node("sdk1_position_node"),
-      pos_cmd_time_(this->now()),
+      last_cmd_time_(this->now()),
       last_vx_(0.0), last_vy_(0.0), last_wz_(0.0),
       cmd_vx_(0.0), cmd_vy_(0.0), cmd_wz_(0.0),
       joy_vx_(0.0), joy_vy_(0.0), joy_wz_(0.0),
@@ -46,6 +46,8 @@ public:
         auto period = std::chrono::microseconds(static_cast<int64_t>(1'000'000 / std::max(1, control_rate_hz)));
         control_timer_ = this->create_wall_timer(
             period, std::bind(&SDK1ControlNode::controlLoop, this));
+
+        RCLCPP_INFO(get_logger(), "VelocityNode started. rate=%dHz, stale_timeout=%.2fs", control_rate_hz, stale_timeout_s_);
     }
 
 private:
@@ -59,7 +61,7 @@ private:
         cmd_vx_ = clamp(msg->linear.x, -max_vx_, max_vx_);
         cmd_vy_ = clamp(msg->linear.y, -max_vy_, max_vy_);
         cmd_wz_ = clamp(msg->angular.z, -max_wz_, max_wz_);
-        pos_cmd_time_ = this->now();
+        last_cmd_time_ = this->now();
         sent_stop_ = false;
     }
 
@@ -80,17 +82,23 @@ private:
         }
 
         const auto now = this->now();
-        const double dt_pos = (now - pos_cmd_time_).seconds();
+        const double dt_pos = (now - last_cmd_time_).seconds();
 
         if (dt_pos <= stale_timeout_s_) { // Respond to position commands
             last_vx_ = cmd_vx_;
             last_vy_ = cmd_vy_;
             last_wz_ = cmd_wz_;
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                                 "Applying ROS CmdVel: vx=%.2f, vy=%.2f, wz=%.2f", 
+                                 last_vx_, last_vy_, last_wz_);
             robot_control_->applyVelCmdControl(last_vx_, last_vy_, last_wz_);
         } else { // Use joystick commands
             last_vx_ = joy_vx_;
             last_vy_ = joy_vy_;
             last_wz_ = joy_wz_;
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                                 "Applying Joystick CmdVel: vx=%.2f, vy=%.2f, wz=%.2f", 
+                                 last_vx_, last_vy_, last_wz_);
             robot_control_->applyVelCmdControl(last_vx_, last_vy_, last_wz_);
         }
     }
@@ -100,7 +108,7 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_sub_;
     rclcpp::TimerBase::SharedPtr control_timer_;
 
-    rclcpp::Time pos_cmd_time_;
+    rclcpp::Time last_cmd_time_;
     double last_vx_; double last_vy_; double last_wz_;
     double cmd_vx_; double cmd_vy_; double cmd_wz_;
     double joy_vx_; double joy_vy_; double joy_wz_;

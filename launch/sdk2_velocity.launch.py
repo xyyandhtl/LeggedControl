@@ -13,7 +13,7 @@ def generate_launch_description():
         description='Network interface for Unitree DDS, e.g., eth0/enp3s0')
 
     timeout_arg = DeclareLaunchArgument(
-        'timeout_s', default_value='5.0',
+        'timeout_s', default_value='3.0',
         description='sport client timeout in seconds')
 
     control_rate_arg = DeclareLaunchArgument(
