@@ -66,6 +66,10 @@ private:
     xRockerBtnDataStruct key_data_ = {0}; // Joystick data
     static constexpr int LOW_CMD_LENGTH = 610;
     static constexpr int LOW_STATE_LENGTH = 771;
+    std::mutex low_state_mtx_;
+    // std::mutex low_cmd_mtx_;
+    
+    float control_dt_ = 0.002;
 
     // Observation-related state
     std::string config_path_;
@@ -86,8 +90,6 @@ private:
     std::unique_ptr<LoopFunc> loop_udpSend;
     std::unique_ptr<LoopFunc> loop_udpRecv;
     std::unique_ptr<LoopFunc> loop_control;
-    std::mutex low_state_mtx_;
-    // std::mutex low_cmd_mtx_;
 
     void ensureObsBuffers();
     static std::array<float, 3> gravFromQuatWxyz(const std::array<float, 4>& q_wxyz);

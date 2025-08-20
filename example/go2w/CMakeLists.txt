@@ -1,8 +1,10 @@
 # Go2W examples using unitree_sdk2 (new SDK)
 # These examples demonstrate DDS-based control for Go2W robots
 
-add_executable(go2w_sport_client go2w_sport_client.cpp)
-target_link_libraries(go2w_sport_client unitree_sdk2)
+file(GLOB EXAMPLES_SRC "*.cpp")
 
-add_executable(go2w_stand_example go2w_stand_example.cpp)
-target_link_libraries(go2w_stand_example unitree_sdk2)
+foreach(SRC_FILE ${EXAMPLES_SRC})
+    get_filename_component(EXEC_NAME ${SRC_FILE} NAME_WE)
+    add_executable(${EXEC_NAME} ${SRC_FILE})
+    target_link_libraries(${EXEC_NAME} unitree_sdk2)
+endforeach()

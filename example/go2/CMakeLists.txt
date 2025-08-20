@@ -1,23 +1,10 @@
 # Go2 examples using unitree_sdk2 (new SDK)
 # These examples demonstrate DDS-based control for Go2 robots
 
-# add_executable(go2_trajectory_follow go2_trajectory_follow.cpp)
-# target_link_libraries(go2_trajectory_follow unitree_sdk2)
+file(GLOB EXAMPLES_SRC "*.cpp")
 
-add_executable(go2_sport_client go2_sport_client.cpp)
-target_link_libraries(go2_sport_client unitree_sdk2)
-
-add_executable(go2_low_level go2_low_level.cpp)
-target_link_libraries(go2_low_level unitree_sdk2)
-
-add_executable(go2_stand_example go2_stand_example.cpp)
-target_link_libraries(go2_stand_example unitree_sdk2)
-
-add_executable(go2_robot_state_client go2_robot_state_client.cpp)
-target_link_libraries(go2_robot_state_client unitree_sdk2)
-
-add_executable(go2_video_client go2_video_client.cpp)
-target_link_libraries(go2_video_client unitree_sdk2)
-
-add_executable(go2_vui_client go2_vui_client.cpp)
-target_link_libraries(go2_vui_client unitree_sdk2)
+foreach(SRC_FILE ${EXAMPLES_SRC})
+    get_filename_component(EXEC_NAME ${SRC_FILE} NAME_WE)
+    add_executable(${EXEC_NAME} ${SRC_FILE})
+    target_link_libraries(${EXEC_NAME} unitree_sdk2)
+endforeach()

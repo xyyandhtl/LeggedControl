@@ -21,7 +21,6 @@
 #include <unitree/robot/b2/motion_switcher/motion_switcher_client.hpp>
 #include <onnxruntime_cxx_api.h>
 
-// ---- Align SDK2 interfaces to SDK1: same config/result names and fields ----
 struct SDK2PolicyConfig {
     std::string onnx_model_path = "policy_model.onnx";
     float act_scale = 0.5f;
@@ -85,6 +84,8 @@ private:
     std::mutex low_state_mtx_;
     // std::mutex low_cmd_mtx_;
 
+    float control_dt_ = 0.002;
+
     // High-level client
     std::unique_ptr<unitree::robot::go2::SportClient> sport_client_;
     // Low-level control loop thread
@@ -117,7 +118,6 @@ private:
     std::thread lowcmd_loop_;
     std::atomic<bool> lowcmd_loop_running_{false};
 
-private:
     void onLowStateMessage(const void* msg);
 
     int queryMotionStatus();

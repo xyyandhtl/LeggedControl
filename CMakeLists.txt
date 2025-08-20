@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH};/home/lenovo/Softwares/libtorch/)
 
 # 选项
-option(BUILD_EXAMPLES "Build example programs" OFF)
+option(BUILD_EXAMPLES "Build example programs" ON)
 
 # ROS2依赖
 find_package(ament_cmake REQUIRED)
@@ -118,17 +118,6 @@ install(TARGETS
   go2_node
   DESTINATION lib/${PROJECT_NAME}
 )
-
-# 安装示例
-if(BUILD_EXAMPLES)
-  install(TARGETS
-    go2w_sport_client
-    go2w_stand_example
-    aliengo_position
-    aliengo_velocity
-    DESTINATION lib/${PROJECT_NAME}/examples
-  )
-endif()
 
 # 安装启动文件
 install(DIRECTORY

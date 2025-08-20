@@ -8,7 +8,6 @@
 #include <sstream>
 #include <cctype>
 #include <iterator>
-#include <onnxruntime_cxx_api.h>
 #include "../common/utils.h"
 
 SDK1PolicyConfig SDK1PolicyConfig::FromFile(const std::string& path, bool* ok) {
@@ -81,6 +80,9 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
 
     udp_.InitCmdData(cmd_);
     cmd_.levelFlag = LOWLEVEL;
+    udp_.Recv();
+    udp_.GetRecv(state_);
+    udp_.Send();
 
     // Load config
     config_path_ = config_path;
@@ -111,7 +113,7 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
         const size_t in_count = ort_session_->GetInputCount();
         const size_t out_count = ort_session_->GetOutputCount();
         if (in_count == 0 || out_count == 0) {
-            std::cerr << "[SDK1] ONNX: invalid IO count (in=" << in_count
+            std::cerr << "NNX: invalid IO count (in=" << in_count
                       << ", out=" << out_count << ")" << std::endl;
             ort_session_.reset();
             onnx_ready_ = false;
@@ -127,26 +129,32 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
             ort_input_names_  = { ort_input_names_str_[0].c_str() };
             ort_output_names_ = { ort_output_names_str_[0].c_str() };
             onnx_ready_ = true;
-            std::cout << "[SDK1] ONNX loaded: " << obs_cfg_.onnx_model_path
+            std::cout << "ONNX loaded: " << obs_cfg_.onnx_model_path
                       << " input=" << ort_input_names_str_[0]
                       << " output=" << ort_output_names_str_[0] << std::endl;
         }
     } catch (const Ort::Exception& e) {
-        std::cerr << "[SDK1] ONNX load error: " << e.what()
+        std::cerr << "ONNX load error: " << e.what()
                   << " path=" << obs_cfg_.onnx_model_path << std::endl;
         ort_session_.reset();
         onnx_ready_ = false;
     }
 
+    // loop_udpSend and loop_udpRecv can be merged to one thread
     loop_udpSend = std::make_unique<LoopFunc>(
-        "udp_send", 0.002, 3, boost::bind(&SDK1RobotControl::udpSend, this));
+        "udp_send", control_dt_, 3, boost::bind(&SDK1RobotControl::udpSend, this));
     loop_udpRecv = std::make_unique<LoopFunc>(
-        "udp_recv", 0.002, 3, boost::bind(&SDK1RobotControl::udpRecv, this));
+        "udp_recv", control_dt_, 3, boost::bind(&SDK1RobotControl::udpRecv, this));
     loop_control = std::make_unique<LoopFunc>(
         "control_loop", 0.02, 3, boost::bind(&SDK1RobotControl::controlLoop, this));
     loop_udpSend->start();
     loop_udpRecv->start();
-    resetJointPosition();   // todo: wait joystick reset
+
+    std::cout << "[SDK1] Waiting for joystick to reset and begin loop_control..." << std::endl;
+    while (getJoystickData().btn.components.up != 1) {
+        std::this_thread::sleep_for(std::chrono::duration<double>(control_dt_));
+    }
+    resetJointPosition();
     loop_control->start();
 }
 
@@ -169,22 +177,17 @@ SDK1RobotControl::~SDK1RobotControl()
 
 void SDK1RobotControl::controlLoop()
 {
-    {
-        std::lock_guard<std::mutex> lk(low_state_mtx_);
-        udp_.GetRecv(state_);
-        std::memcpy(&key_data_, &state_.wirelessRemote, sizeof(xRockerBtnDataStruct)); // Update joystick data
-    }
     SDK1RobotObsResult res = getRobotObs();
 
     const int frame = obs_cfg_.obs_size;
     const std::size_t total = static_cast<std::size_t>(frame) * std::max<std::size_t>(obs_cfg_.history_steps, std::size_t(1));
     if (res.his_obs.size() < total) {
-        std::cerr << "[SDK1] ONNX infer: his_obs size too small: " << res.his_obs.size()
+        std::cerr << "ONNX infer: his_obs size too small: " << res.his_obs.size()
                   << " < " << total << std::endl;
         return;
     }
     if (!onnx_ready_ || !ort_session_) {
-        std::cerr << "[SDK1] ONNX infer: session not ready." << std::endl;
+        std::cerr << "ONNX infer: session not ready." << std::endl;
         return;
     }
 
@@ -202,7 +205,7 @@ void SDK1RobotControl::controlLoop()
                                          ort_output_names_.data(), 1);
 
         if (outputs.empty() || !outputs[0].IsTensor()) {
-            std::cerr << "[SDK1] ONNX infer: empty or non-tensor output" << std::endl;
+            std::cerr << "ONNX infer: empty or non-tensor output" << std::endl;
             return;
         }
 
@@ -211,7 +214,7 @@ void SDK1RobotControl::controlLoop()
         // 打印 1x12 输出
         static uint64_t policy_cnt = 0;
         if ((++policy_cnt % 50) == 0) {
-            std::cout << "[SDK1] ONNX infer out: ";
+            std::cout << "ONNX infer out: ";
             for (int i = 0; i < 12; ++i) {
                 if (i) std::cout << ", ";
                 std::cout << out[i];
@@ -235,34 +238,60 @@ void SDK1RobotControl::controlLoop()
 
         applyPositionControl(joint_positions);
     } catch (const Ort::Exception& e) {
-        std::cerr << "[SDK1] ONNX runtime error: " << e.what() << std::endl;
+        std::cerr << "ONNX runtime error: " << e.what() << std::endl;
         return;
     }
 }
 
 void SDK1RobotControl::resetJointPosition()
 {
-    const int steps = 200; // 2 seconds at 10ms intervals
-    const double interval = 0.01; // 10ms
-    std::array<double, 12> current_positions{};
-    std::array<double, 12> target_positions{};
-    udp_.GetRecv(state_);
+    // Parameters analogous to the Python logic
+    const double max_time = 5.0;       // seconds
+    const double control_freq = 20.0;  // Hz
+    const double act_clip = 0.1;       // rad per step
 
-    // Initialize current and target positions
+    // 1) Read current joint positions (thread-safe)
+    std::array<double, 12> joint_pos{};
+    std::array<double, 12> dft_dof_pos{};
     for (int i = 0; i < 12; ++i) {
-        current_positions[i] = state_.motorState[i].q;
-        target_positions[i] = static_cast<double>(obs_cfg_.dft_dof_pos[i]);
+        joint_pos[i] = static_cast<double>(state_.motorState[i].q);
+        dft_dof_pos[i] = static_cast<double>(obs_cfg_.dft_dof_pos[i]);
+        std::cout << "[" << joint_pos[i] << "|" << dft_dof_pos[i] << "], ";
+    }
+    std::cout << std::endl;
+
+    // 2) Compute number of steps based on max delta and act_clip
+    double act_max = 0.0;
+    for (int i = 0; i < 12; ++i) {
+        const double diff = std::abs(joint_pos[i] - dft_dof_pos[i]);
+        if (diff > act_max) act_max = diff;
+    }
+    const int num_steps = std::max(1, static_cast<int>(std::ceil(act_max / act_clip)));
+    const auto interval = std::chrono::duration<double>(1.0 / control_freq);
+
+    // 3) Progressive reset with timeout check
+    const auto start_time = std::chrono::steady_clock::now();
+    for (int step = 0; step < num_steps; ++step) {
+        const auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration<double>(now - start_time).count() > max_time) {
+            std::cerr << "[SDK1] RESET FAILED: timeout after " << max_time << "s" << std::endl;
+            break;
+        }
+
+        const double ratio = static_cast<double>(step + 1) / static_cast<double>(num_steps);
+        std::array<double, 12> interp{};
+        for (int i = 0; i < 12; ++i) {
+            interp[i] = joint_pos[i] * (1.0 - ratio) + dft_dof_pos[i] * ratio;
+            std::cout << interp[i] << ", ";
+        }
+        std::cout << std::endl;
+
+        applyPositionControl(interp);
+        std::this_thread::sleep_for(std::chrono::duration_cast<std::chrono::milliseconds>(interval));
     }
 
-    for (int step = 0; step <= steps; ++step) {
-        std::array<double, 12> interpolated_positions{};
-        for (int i = 0; i < 12; ++i) {
-            interpolated_positions[i] = current_positions[i] + 
-                (target_positions[i] - current_positions[i]) * (static_cast<double>(step) / steps);
-        }
-        applyPositionControl(interpolated_positions);
-        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(interval * 1000)));
-    }
+    // 4) Ensure the final command reaches the default pose
+    applyPositionControl(dft_dof_pos);
 }
 
 void SDK1RobotControl::applyPositionControl(const std::array<double, 12> &joint_positions)
@@ -276,10 +305,10 @@ void SDK1RobotControl::applyPositionControl(const std::array<double, 12> &joint_
         cmd_.motorCmd[i].tau = 0.0f;
     }
     // Gravity compensation
-    cmd_.motorCmd[FR_0].tau = -1.6f;
-    cmd_.motorCmd[FL_0].tau = -1.6f;
-    cmd_.motorCmd[RR_0].tau = -1.6f;
-    cmd_.motorCmd[RL_0].tau = -1.6f;
+    // cmd_.motorCmd[FR_0].tau = -1.6f;
+    // cmd_.motorCmd[FL_0].tau = -1.6f;
+    // cmd_.motorCmd[RR_0].tau = -1.6f;
+    // cmd_.motorCmd[RL_0].tau = -1.6f;
 
     udp_.SetSend(cmd_);
 }
@@ -389,12 +418,14 @@ SDK1RobotObsResult SDK1RobotControl::getRobotObs()
 void SDK1RobotControl::udpRecv()
 {
     udp_.Recv();
-    // udp_.GetRecv(state_);
-    // std::memcpy(&key_data_, &state_.wirelessRemote, sizeof(xRockerBtnDataStruct)); // Update joystick data
+    udp_.GetRecv(state_);
+    std::memcpy(&key_data_, &state_.wirelessRemote, sizeof(xRockerBtnDataStruct)); // Update joystick data
 }
 
 void SDK1RobotControl::udpSend()
 {
+    safe_.PowerProtect(cmd_, state_, 8);
+    // safe_.PositionProtect(cmd, state, 0.087);
     udp_.Send();
 }
 

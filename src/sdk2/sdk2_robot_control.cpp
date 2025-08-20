@@ -1,8 +1,5 @@
 #include "sdk2_robot_control.h"
 #include <iostream>
-#include <cstring>
-#include <thread>
-#include <chrono>
 #include <algorithm>
 #include <atomic>
 #include <fstream>
@@ -10,7 +7,6 @@
 #include <cctype>
 #include <iterator>
 #include "../common/utils.h"
-#include <unitree/common/thread/thread.hpp>
 
 // 常量与示例一致
 static constexpr double PosStopF = (2.146E+9f);
@@ -146,7 +142,7 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
         const size_t in_count = ort_session_->GetInputCount();
         const size_t out_count = ort_session_->GetOutputCount();
         if (in_count == 0 || out_count == 0) {
-            std::cerr << "[SDK2] ONNX: invalid IO count (in=" << in_count
+            std::cerr << "NNX: invalid IO count (in=" << in_count
                       << ", out=" << out_count << ")" << std::endl;
             ort_session_.reset();
             onnx_ready_ = false;
@@ -162,18 +158,19 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
             ort_input_names_  = { ort_input_names_str_[0].c_str() };
             ort_output_names_ = { ort_output_names_str_[0].c_str() };
             onnx_ready_ = true;
-            std::cout << "[SDK2] ONNX loaded: " << obs_cfg_.onnx_model_path
+            std::cout << "ONNX loaded: " << obs_cfg_.onnx_model_path
                       << " input=" << ort_input_names_str_[0]
                       << " output=" << ort_output_names_str_[0] << std::endl;
         }
     } catch (const Ort::Exception& e) {
-        std::cerr << "[SDK2] ONNX load error: " << e.what()
+        std::cerr << "ONNX load error: " << e.what()
                   << " path=" << obs_cfg_.onnx_model_path << std::endl;
         ort_session_.reset();
         onnx_ready_ = false;
     }
 
     // Start control loop thread
+    // todo: add joystick to reset and begin control loop
     controlLoopThreadPtr_ = unitree::common::CreateRecurrentThreadEx(
         "controlLoopThread", UT_CPU_ID_NONE, 20000, &SDK2RobotControl::controlLoop, this);
     std::cout << "[SDK2] Control loop thread started" << std::endl;
@@ -194,12 +191,12 @@ void SDK2RobotControl::controlLoop()
     const int frame = obs_cfg_.obs_size;
     const std::size_t total = static_cast<std::size_t>(frame) * std::max<std::size_t>(obs_cfg_.history_steps, std::size_t(1));
     if (res.his_obs.size() < total) {
-        std::cerr << "[SDK2] ONNX infer: his_obs size too small: " << res.his_obs.size()
+        std::cerr << "ONNX infer: his_obs size too small: " << res.his_obs.size()
                   << " < " << total << std::endl;
         return;
     }
     if (!onnx_ready_ || !ort_session_) {
-        std::cerr << "[SDK2] ONNX infer: session not ready." << std::endl;
+        std::cerr << "ONNX infer: session not ready." << std::endl;
         return;
     }
 
@@ -217,7 +214,7 @@ void SDK2RobotControl::controlLoop()
                                          ort_output_names_.data(), 1);
 
         if (outputs.empty() || !outputs[0].IsTensor()) {
-            std::cerr << "[SDK2] ONNX infer: empty or non-tensor output" << std::endl;
+            std::cerr << "ONNX infer: empty or non-tensor output" << std::endl;
             return;
         }
 
@@ -226,7 +223,7 @@ void SDK2RobotControl::controlLoop()
         // 打印 1x12 输出
         static uint64_t policy_cnt = 0;
         if ((++policy_cnt % 50) == 0) {
-            std::cout << "[SDK2] ONNX infer out: ";
+            std::cout << "ONNX infer out: ";
             for (int i = 0; i < 12; ++i) {
                 if (i) std::cout << ", ";
                 std::cout << out[i];
@@ -250,7 +247,7 @@ void SDK2RobotControl::controlLoop()
 
         applyPositionControl(joint_positions);
     } catch (const Ort::Exception& e) {
-        std::cerr << "[SDK2] ONNX runtime error: " << e.what() << std::endl;
+        std::cerr << "ONNX runtime error: " << e.what() << std::endl;
         return;
     }
 }
@@ -321,7 +318,6 @@ SDK2RobotObsResult SDK2RobotControl::getRobotObs()
         std::lock_guard<std::mutex> lk(low_state_mtx_);
         state_copy = low_state_;
     }
-
     // 1) cmd (3)
     std::array<float, 3> cmd_scaled = last_cmd_;
     cmd_scaled[0] *= obs_cfg_.vel_scale;
