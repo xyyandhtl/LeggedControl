@@ -73,7 +73,7 @@ private:
         // Process joystick input
         joy_vx_ = key_data.ly * max_vx_;  // ly controls forward/backward velocity
         joy_vy_ = key_data.lx * max_vy_;  // lx controls left/right velocity
-        joy_wz_ = key_data.rx * max_wz_;  // rx controls angular velocity (yaw)
+        joy_wz_ = -key_data.rx * max_wz_;  // rx controls angular velocity (yaw)
 
         if (key_data.btn.components.L2) { // Reset joystick commands
             joy_vx_ = 0.0;

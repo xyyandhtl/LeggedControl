@@ -71,7 +71,7 @@ SDK1PolicyConfig SDK1PolicyConfig::FromFile(const std::string& path, bool* ok) {
 }
 
 SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &target_ip, uint16_t target_port, const std::string& config_path)
-    : udp_(local_port, target_ip.c_str(), target_port, LOW_CMD_LENGTH, LOW_STATE_LENGTH),
+    : udp_(local_port, target_ip.c_str(), target_port, LOW_CMD_LENGTH, LOW_STATE_LENGTH, -1),
       safe_(LeggedType::Aliengo)
 {
     std::cout << "[SDK1] local_port=" << local_port
@@ -82,6 +82,7 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
     cmd_.levelFlag = LOWLEVEL;
     udp_.Recv();
     udp_.GetRecv(state_);
+    udp_.SetSend(cmd_);
     udp_.Send();
 
     // Load config
@@ -146,15 +147,19 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
     loop_udpRecv = std::make_unique<LoopFunc>(
         "udp_recv", control_dt_, 3, boost::bind(&SDK1RobotControl::udpRecv, this));
     loop_control = std::make_unique<LoopFunc>(
-        "control_loop", 0.02, 3, boost::bind(&SDK1RobotControl::controlLoop, this));
+        "control_loop", 0.02, boost::bind(&SDK1RobotControl::controlLoop, this));
     loop_udpSend->start();
     loop_udpRecv->start();
 
     std::cout << "[SDK1] Waiting for joystick to reset and begin loop_control..." << std::endl;
     while (getJoystickData().btn.components.up != 1) {
+        // std::cout << state_.motorState[1].q << std::endl;
         std::this_thread::sleep_for(std::chrono::duration<double>(control_dt_));
     }
     resetJointPosition();
+    while (getJoystickData().btn.components.up != 1) {
+        std::this_thread::sleep_for(std::chrono::duration<double>(control_dt_));
+    }
     loop_control->start();
 }
 
@@ -282,16 +287,20 @@ void SDK1RobotControl::resetJointPosition()
         std::array<double, 12> interp{};
         for (int i = 0; i < 12; ++i) {
             interp[i] = joint_pos[i] * (1.0 - ratio) + dft_dof_pos[i] * ratio;
-            std::cout << interp[i] << ", ";
+            // std::cout << interp[i] << ", ";
         }
-        std::cout << std::endl;
+        // std::cout << std::endl;
 
-        applyPositionControl(interp);
+        for (int i = 0; i < 12; i++) {
+            cmd_.motorCmd[i].q  = interp[i];
+            cmd_.motorCmd[i].dq = 0.0;
+            cmd_.motorCmd[i].Kp = 80.0;
+            cmd_.motorCmd[i].Kd = 2.0;
+            cmd_.motorCmd[i].tau = 0.0f;
+        }
+        // applyPositionControl(interp);
         std::this_thread::sleep_for(std::chrono::duration_cast<std::chrono::milliseconds>(interval));
     }
-
-    // 4) Ensure the final command reaches the default pose
-    applyPositionControl(dft_dof_pos);
 }
 
 void SDK1RobotControl::applyPositionControl(const std::array<double, 12> &joint_positions)
@@ -310,7 +319,7 @@ void SDK1RobotControl::applyPositionControl(const std::array<double, 12> &joint_
     // cmd_.motorCmd[RR_0].tau = -1.6f;
     // cmd_.motorCmd[RL_0].tau = -1.6f;
 
-    udp_.SetSend(cmd_);
+    // udp_.SetSend(cmd_);
 }
 
 void SDK1RobotControl::applyVelCmdControl(double vx, double vy, double wz)
@@ -346,6 +355,7 @@ SDK1RobotObsResult SDK1RobotControl::getRobotObs()
     std::array<float, 3> gyr = state_copy.imu.gyroscope;
     for (int i = 0; i < 3; ++i) {
         gyr[i] *= obs_cfg_.gyr_scale;
+        // gyr[i] = clip(gyr[i], -0.12f, 0.12f);
     }
     // gyr[2] = clip(gyr[2], -0.12f, 0.12f); // temporary IMU clipping
 
@@ -424,8 +434,22 @@ void SDK1RobotControl::udpRecv()
 
 void SDK1RobotControl::udpSend()
 {
+    static uint64_t rec_cnt = 0;
+    if ((++rec_cnt % 500) == 0) {
+        std::cout << "current joint pos: ";
+        for (int i = 0; i < 12; ++i) {
+            std::cout << state_.motorState[i].q << ", ";
+        }
+        std::cout << std::endl;
+        std::cout << "current cmd pos: ";
+        for (int i = 0; i < 12; ++i) {
+            std::cout << cmd_.motorCmd[i].q << ", ";
+        }
+        std::cout << std::endl;
+    }
     safe_.PowerProtect(cmd_, state_, 8);
     // safe_.PositionProtect(cmd, state, 0.087);
+    udp_.SetSend(cmd_);
     udp_.Send();
 }
 
@@ -438,7 +462,7 @@ void SDK1RobotControl::stopMotors()
         cmd_.motorCmd[i].Kd = 0;
         cmd_.motorCmd[i].tau = 0.0f;
     }
-    udp_.SetSend(cmd_);
+    // udp_.SetSend(cmd_);
 }
 
 xRockerBtnDataStruct SDK1RobotControl::getJoystickData() const
