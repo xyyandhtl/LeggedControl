@@ -23,7 +23,7 @@ find_package(sensor_msgs REQUIRED)
 # message("Torch libraries: ${TORCH_LIBRARIES}")
 
 # SDK路径
-set(UNITREE_SDK_PATH ${CMAKE_CURRENT_SOURCE_DIR})
+set(UNITREE_SDK_PATH ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty)
 
 # 包含目录
 include_directories(
@@ -32,7 +32,6 @@ include_directories(
   ${UNITREE_SDK_PATH}/include/unitree_sdk1
   ${UNITREE_SDK_PATH}/include/ddscxx
   ${UNITREE_SDK_PATH}/include/onnxruntime
-  ${UNITREE_SDK_PATH}/src
 )
 
 # 架构选择库路径
@@ -80,13 +79,14 @@ if(BUILD_EXAMPLES)
 endif()
 
 # 直接构建 node，并把实现源码编进可执行文件
+include_directories(include)
 add_executable(aliengo_node
   src/aliengo_node.cpp
-  src/sdk1/sdk1_robot_control.cpp
+  src/sdk1_robot_control.cpp
 )
 add_executable(go2_node
   src/go2_node.cpp
-  src/sdk2/sdk2_robot_control.cpp
+  src/sdk2_robot_control.cpp
 )
 
 ament_target_dependencies(aliengo_node

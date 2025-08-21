@@ -5,7 +5,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/twist.hpp>
-#include "sdk2/sdk2_robot_control.h"
+#include "sdk2_robot_control.h"
 
 namespace unitree_control
 {

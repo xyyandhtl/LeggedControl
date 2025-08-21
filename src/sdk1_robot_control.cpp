@@ -8,7 +8,7 @@
 #include <sstream>
 #include <cctype>
 #include <iterator>
-#include "../common/utils.h"
+#include "utils.h"
 
 SDK1PolicyConfig SDK1PolicyConfig::FromFile(const std::string& path, bool* ok) {
     SDK1PolicyConfig cfg;
@@ -72,7 +72,7 @@ SDK1PolicyConfig SDK1PolicyConfig::FromFile(const std::string& path, bool* ok) {
 
 SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &target_ip, uint16_t target_port, const std::string& config_path)
     : udp_(local_port, target_ip.c_str(), target_port, LOW_CMD_LENGTH, LOW_STATE_LENGTH, -1),
-      safe_(LeggedType::Aliengo), /*last_time_(std::chrono::steady_clock::now())*/
+      safe_(LeggedType::Aliengo)/*, last_time_(std::chrono::steady_clock::now())*/
 {
     std::cout << "[SDK1] local_port=" << local_port
               << " target_ip=" << target_ip

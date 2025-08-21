@@ -4,7 +4,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/twist.hpp>
-#include "sdk1/sdk1_robot_control.h" // Include the robot control logic
+#include "sdk1_robot_control.h" // Include the robot control logic
 
 class SDK1ControlNode : public rclcpp::Node
 {

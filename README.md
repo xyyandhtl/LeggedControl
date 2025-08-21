@@ -8,10 +8,10 @@
 
 ## 依赖
 - ROS 2: ament_cmake, rclcpp, geometry_msgs, std_msgs, sensor_msgs
-- include/ lib/ 为三方依赖库，实际应放在third_party/，只为减少一层目录，现包括：
+- thirdparty/ 为三方依赖库，现包括：
   - Unitree SDK1、SDK2 与其依赖 CycloneDDS
   - ONNX Runtime CPU版（GPU版简单修改即可）
-- src/ 为所有部署源码，以后多了再调文件结构吧
+- include/ src/ 为所有部署源码
 
 ## 运行
 - SDK1（Go1/Aliengo）
