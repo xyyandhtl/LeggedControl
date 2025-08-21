@@ -72,7 +72,7 @@ SDK1PolicyConfig SDK1PolicyConfig::FromFile(const std::string& path, bool* ok) {
 
 SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &target_ip, uint16_t target_port, const std::string& config_path)
     : udp_(local_port, target_ip.c_str(), target_port, LOW_CMD_LENGTH, LOW_STATE_LENGTH, -1),
-      safe_(LeggedType::Aliengo)
+      safe_(LeggedType::Aliengo), /*last_time_(std::chrono::steady_clock::now())*/
 {
     std::cout << "[SDK1] local_port=" << local_port
               << " target_ip=" << target_ip
@@ -345,6 +345,7 @@ SDK1RobotObsResult SDK1RobotControl::getRobotObs()
         std::lock_guard<std::mutex> lk(low_state_mtx_);
         state_copy = state_;
     }
+
     // 1) cmd (3)
     std::array<float, 3> cmd_scaled = last_cmd_;
     cmd_scaled[0] *= obs_cfg_.vel_scale;
@@ -357,7 +358,27 @@ SDK1RobotObsResult SDK1RobotControl::getRobotObs()
         gyr[i] *= obs_cfg_.gyr_scale;
         // gyr[i] = clip(gyr[i], -0.12f, 0.12f);
     }
-    // gyr[2] = clip(gyr[2], -0.12f, 0.12f); // temporary IMU clipping
+    // std::array<float, 3> gyr_avg = {0.0f, 0.0f, 0.0f};
+    // float total_weight = 0.0f;
+    // {
+    //     std::lock_guard<std::mutex> lk(low_state_mtx_);
+    //     int valid_updates = std::min(gyr_update_count_, 12);
+
+    //     for (int i = 0; i < valid_updates; ++i) {
+    //         int index = (gyr_update_count_ - 1 - i) % 12;
+    //         float weight = gyr_weights_[index];
+    //         total_weight += weight;
+    //         for (int j = 0; j < 3; ++j) {
+    //             gyr_avg[j] += gyr_buffer_[index][j] * weight;
+    //         }
+    //     }
+    // }
+    // if (total_weight > 0) {
+    //     for (int j = 0; j < 3; ++j) {
+    //         gyr_avg[j] /= total_weight;
+    //         gyr_avg[j] *= obs_cfg_.gyr_scale;
+    //     }
+    // }
 
     // 3) grav (3) from quaternion (w,x,y,z)
     std::array<float, 3> grav = gravFromQuatWxyz(state_copy.imu.quaternion);
@@ -392,7 +413,7 @@ SDK1RobotObsResult SDK1RobotControl::getRobotObs()
     obs.reserve(obs_size);
 
     obs.insert(obs.end(), cmd_scaled.begin(), cmd_scaled.end());
-    obs.insert(obs.end(), gyr.begin(), gyr.end());
+    obs.insert(obs.end(), gyr.begin(), gyr.end());  // gyr_avg
     obs.insert(obs.end(), grav.begin(), grav.end());
     obs.insert(obs.end(), dof_pos.begin(), dof_pos.end());
     obs.insert(obs.end(), dof_vel.begin(), dof_vel.end());
@@ -419,6 +440,7 @@ SDK1RobotObsResult SDK1RobotControl::getRobotObs()
     
     static uint64_t obs_cnt = 0;
     if ((++obs_cnt % 50) == 0) {
+        std::cout << "Current robot obs: ";
         std::copy(obs.begin(), obs.end(), std::ostream_iterator<float>(std::cout, " "));
         std::cout << std::endl;
     }
@@ -430,6 +452,16 @@ void SDK1RobotControl::udpRecv()
     udp_.Recv();
     udp_.GetRecv(state_);
     std::memcpy(&key_data_, &state_.wirelessRemote, sizeof(xRockerBtnDataStruct)); // Update joystick data
+
+    // If need averaging something
+    // auto current_time = std::chrono::steady_clock::now();
+    // float time_interval = std::chrono::duration<float>(current_time - last_time_).count();
+    // last_time_ = current_time;
+    // std::lock_guard<std::mutex> lk(low_state_mtx_);
+    // int index = gyr_update_count_ % 12;
+    // gyr_buffer_[index] = state_.imu.gyroscope;
+    // gyr_weights_[index] = time_interval;
+    // gyr_update_count_++;
 }
 
 void SDK1RobotControl::udpSend()

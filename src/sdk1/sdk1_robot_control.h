@@ -77,6 +77,11 @@ private:
     std::vector<float> his_obs_;
     std::array<float, 3> last_cmd_{0.0f, 0.0f, 0.0f};
     std::array<float, 12> last_act_{};
+    // If need averaging something
+    // std::array<std::array<float, 3>, 12> gyr_buffer_{}; // Buffer for last 12 gyroscope readings
+    // std::array<float, 12> gyr_weights_{}; // Time intervals between consecutive frames
+    // int gyr_update_count_ = 0; // Counter for gyroscope updates
+    // std::chrono::steady_clock::time_point last_time_; // Timestamp of the last update
 
     // ONNX Runtime members
     std::unique_ptr<Ort::Env> ort_env_;

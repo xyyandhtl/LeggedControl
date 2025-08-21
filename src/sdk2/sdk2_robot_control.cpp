@@ -318,6 +318,7 @@ SDK2RobotObsResult SDK2RobotControl::getRobotObs()
         std::lock_guard<std::mutex> lk(low_state_mtx_);
         state_copy = low_state_;
     }
+    
     // 1) cmd (3)
     std::array<float, 3> cmd_scaled = last_cmd_;
     cmd_scaled[0] *= obs_cfg_.vel_scale;
