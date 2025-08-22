@@ -1,4 +1,23 @@
 #include "base_robot_control.h"
+#include <onnxruntime_cxx_api.h>
+#include <provider_options.h>
+
+// 通用：把 ProviderOptions 映射到 C API 所需的 keys/values 并附加 EP
+namespace {
+inline void AppendEP(Ort::SessionOptions& so, const char* provider_name, const onnxruntime::ProviderOptions& opts) {
+    std::vector<const char*> keys; keys.reserve(opts.size());
+    std::vector<const char*> vals; vals.reserve(opts.size());
+    for (const auto& kv : opts) { keys.push_back(kv.first.c_str()); vals.push_back(kv.second.c_str()); }
+#if ORT_API_VERSION >= 17
+    Ort::ThrowOnError(Ort::GetApi().SessionOptionsAppendExecutionProvider(so, provider_name,
+                                                                          keys.data(), vals.data(), keys.size()));
+#else
+    // 兼容旧 API 名称
+    Ort::ThrowOnError(Ort::GetApi().SessionOptionsAppendExecutionProvider_V2(so, provider_name,
+                                                                             keys.data(), vals.data(), keys.size()));
+#endif
+}
+} // namespace
 
 BaseRobotControl::PolicyConfig BaseRobotControl::PolicyConfig::FromFile(const std::string& path, bool* ok) 
 {
@@ -83,23 +102,60 @@ void BaseRobotControl::setObsConfig(const PolicyConfig& cfg)
     ensureObsBuffers();
 }
 
-void BaseRobotControl::loadOnnxModel(const std::string& onnx_path) 
+void BaseRobotControl::loadOnnxModel(const std::string& onnx_path)
+{
+    // 兼容旧接口：默认 CPU
+    loadOnnxModel(onnx_path, OnnxOptions{});
+}
+
+void BaseRobotControl::loadOnnxModel(const std::string& onnx_path, const OnnxOptions& opt) 
 {
     try {
         ort_env_ = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "robot_policy");
-        Ort::SessionOptions opt;
-        opt.SetIntraOpNumThreads(1);
-        opt.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
+        Ort::SessionOptions so;
+        so.SetIntraOpNumThreads(1);
+        so.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
-        ort_session_ = std::make_unique<Ort::Session>(*ort_env_, onnx_path.c_str(), opt);
+        bool using_gpu = false;
+        std::string ep_name = "CPU";
+        try {
+#ifdef ORT_WITH_TENSORRT
+            std::cout << "[BaseRobotControl] Registering TensorRT EP..." << std::endl;
+            onnxruntime::ProviderOptions trt_opts;
+            trt_opts["device_id"] = std::to_string(opt.device_id);
+            // 可选：trt_opts["trt_fp16_enable"] = "1";
+            // 可选：trt_opts["trt_engine_cache_enable"] = "1";
+            AppendEP(so, "TensorrtExecutionProvider", trt_opts);
+            ep_name = "TensorRT";
+            using_gpu = true;
+#elif defined(ORT_WITH_CUDA)
+            std::cout << "[BaseRobotControl] Registering CUDA EP..." << std::endl;
+            onnxruntime::ProviderOptions cuda_opts;
+            cuda_opts["device_id"] = std::to_string(opt.device_id);
+            // 可选：cuda_opts["do_copy_in_default_stream"] = "1";
+            AppendEP(so, "CUDAExecutionProvider", cuda_opts);
+            ep_name = "CUDA";
+            using_gpu = true;
+#endif
+        } catch (const Ort::Exception& e) {
+            std::cerr << "[BaseRobotControl] EP registration failed, fallback to CPU. err=" << e.what() << std::endl;
+            using_gpu = false;
+            ep_name = "CPU";
+        }
+
+        ort_session_ = std::make_unique<Ort::Session>(*ort_env_, onnx_path.c_str(), so);
 
         Ort::AllocatorWithDefaultOptions allocator;
+        ort_input_names_str_.clear();
+        ort_output_names_str_.clear();
         ort_input_names_str_.emplace_back(ort_session_->GetInputNameAllocated(0, allocator).get());
         ort_output_names_str_.emplace_back(ort_session_->GetOutputNameAllocated(0, allocator).get());
-        ort_input_names_ = {ort_input_names_str_[0].c_str()};
-        ort_output_names_ = {ort_output_names_str_[0].c_str()};
+        ort_input_names_  = { ort_input_names_str_[0].c_str() };
+        ort_output_names_ = { ort_output_names_str_[0].c_str() };
         onnx_ready_ = true;
+
         std::cout << "ONNX loaded: " << onnx_path
+                  << " provider=" << ep_name
                   << " input=" << ort_input_names_str_[0]
                   << " output=" << ort_output_names_str_[0] << std::endl;
     } catch (const Ort::Exception& e) {
@@ -118,9 +174,11 @@ bool BaseRobotControl::runOnnxInference(const std::vector<float>& input, std::ve
 
     try {
         const std::array<int64_t, 2> input_shape{1, static_cast<int64_t>(input.size())};
+        // 即使使用 GPU EP，传 CPU 内存也是支持的，ORT 内部会拷贝到 GPU
         Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
-        Ort::Value input_tensor = Ort::Value::CreateTensor<float>(mem, const_cast<float*>(input.data()),
-                                                                  input.size(), input_shape.data(), input_shape.size());
+        Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+            mem, const_cast<float*>(input.data()), input.size(),
+            input_shape.data(), input_shape.size());
 
         auto outputs = ort_session_->Run(Ort::RunOptions{nullptr},
                                          ort_input_names_.data(), &input_tensor, 1,

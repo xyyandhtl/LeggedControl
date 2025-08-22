@@ -8,6 +8,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 选项
 option(BUILD_EXAMPLES "Build example programs" ON)
+# 新增：ONNX Runtime EP 选择
+option(ENABLE_ORT_CUDA "Enable ONNX Runtime CUDA Execution Provider" OFF)
+option(ENABLE_ORT_TENSORRT "Enable ONNX Runtime TensorRT Execution Provider" OFF)
 
 # ROS2依赖
 find_package(ament_cmake REQUIRED)
@@ -15,12 +18,6 @@ find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-
-# Torch依赖
-# find_package(Torch REQUIRED)
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
-# message("Torch include dirs: ${TORCH_INCLUDE_DIRS}")
-# message("Torch libraries: ${TORCH_LIBRARIES}")
 
 # SDK路径
 set(UNITREE_SDK_PATH ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty)
@@ -51,9 +48,6 @@ target_include_directories(unitree_sdk1 INTERFACE
 target_link_libraries(unitree_sdk1 INTERFACE
   ${UNITREE_LIB_PATH}/libunitree_legged_sdk.so
   ${UNITREE_LIB_PATH}/libonnxruntime.so
-  # ${UNITREE_LIB_PATH}/libonnxruntime_providers_shared.so
-  # ${UNITREE_LIB_PATH}/libonnxruntime_providers_cuda.so
-  # ${UNITREE_LIB_PATH}/libonnxruntime_providers_tensorrt.so
 )
 
 add_library(unitree_sdk2 INTERFACE)
@@ -70,6 +64,22 @@ target_link_libraries(unitree_sdk2 INTERFACE
   pthread
   dl
 )
+
+# 新增：按需启用 ORT 的 CUDA/TensorRT Provider 并定义编译宏
+set(ORT_PROVIDER_LIBS "")
+if(ENABLE_ORT_CUDA)
+  list(APPEND ORT_PROVIDER_LIBS ${UNITREE_LIB_PATH}/libonnxruntime_providers_cuda.so)
+endif()
+if(ENABLE_ORT_TENSORRT)
+  list(APPEND ORT_PROVIDER_LIBS ${UNITREE_LIB_PATH}/libonnxruntime_providers_tensorrt.so)
+endif()
+if(ENABLE_ORT_CUDA OR ENABLE_ORT_TENSORRT)
+  list(APPEND ORT_PROVIDER_LIBS ${UNITREE_LIB_PATH}/libonnxruntime_providers_shared.so)
+  list(REMOVE_DUPLICATES ORT_PROVIDER_LIBS)
+  # 链接到两个 SDK 接口库，使下游可执行自动继承
+  target_link_libraries(unitree_sdk1 INTERFACE ${ORT_PROVIDER_LIBS})
+  target_link_libraries(unitree_sdk2 INTERFACE ${ORT_PROVIDER_LIBS})
+endif()
 
 # 示例目录
 if(BUILD_EXAMPLES)
@@ -103,6 +113,16 @@ ament_target_dependencies(go2_node
   std_msgs
   sensor_msgs
 )
+
+# 新增：为包含 EP 代码的目标定义编译宏（用于 #ifdef ORT_WITH_*）
+if(ENABLE_ORT_CUDA)
+  target_compile_definitions(aliengo_node PRIVATE ORT_WITH_CUDA)
+  target_compile_definitions(go2_node    PRIVATE ORT_WITH_CUDA)
+endif()
+if(ENABLE_ORT_TENSORRT)
+  target_compile_definitions(aliengo_node PRIVATE ORT_WITH_TENSORRT)
+  target_compile_definitions(go2_node    PRIVATE ORT_WITH_TENSORRT)
+endif()
 
 # 直接从可执行目标进行链接
 target_link_libraries(aliengo_node unitree_sdk1)  # 移除 ${TORCH_LIBRARIES} 和重复的 onnxruntime

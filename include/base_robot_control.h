@@ -43,6 +43,12 @@ public:
         std::vector<float> his_obs;
     };
 
+    struct OnnxOptions {
+        enum class Provider { CPU, CUDA, TensorRT };
+        Provider provider{Provider::CPU};
+        int device_id{0};     // GPU id
+    };
+
     virtual ~BaseRobotControl() = default;
 
     virtual void resetJointPosition() = 0;
@@ -77,6 +83,7 @@ protected:
     std::mutex low_cmd_mtx_;
 
     void loadOnnxModel(const std::string& onnx_path);
+    void loadOnnxModel(const std::string& onnx_path, const OnnxOptions& opt);
 
     void ensureObsBuffers();
     static inline float clip(float v, float lo, float hi) {
