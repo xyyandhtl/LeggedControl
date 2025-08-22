@@ -1,0 +1,165 @@
+#include "base_robot_control.h"
+
+BaseRobotControl::PolicyConfig BaseRobotControl::PolicyConfig::FromFile(const std::string& path, bool* ok) 
+{
+    PolicyConfig cfg;
+    std::ifstream fin(path, std::ios::in);
+    if (!fin) {
+        if (ok) *ok = false;
+        std::cerr << "[BaseRobotControl] Config open failed: " << path << std::endl;
+        return cfg;
+    }
+    std::string line;
+    while (std::getline(fin, line)) {
+        auto p = line.find_first_of("#;");
+        if (p != std::string::npos) line = line.substr(0, p);
+        p = line.find("//");
+        if (p != std::string::npos) line = line.substr(0, p);
+        line = trim(line);
+        if (line.empty()) continue;
+
+        size_t sep = line.find('=');
+        if (sep == std::string::npos) sep = line.find(':');
+        if (sep == std::string::npos) continue;
+        std::string key = trim(line.substr(0, sep));
+        std::string val = trim(line.substr(sep + 1));
+
+        if (key == "onnx_model_path") cfg.onnx_model_path = val;
+        else if (key == "act_scale") cfg.act_scale = std::stof(val);
+        else if (key == "vel_scale") cfg.vel_scale = std::stof(val);
+        else if (key == "gyr_scale") cfg.gyr_scale = std::stof(val);
+        else if (key == "dof_pos_scale") cfg.dof_pos_scale = std::stof(val);
+        else if (key == "dof_vel_scale") cfg.dof_vel_scale = std::stof(val);
+        else if (key == "obs_clip") cfg.obs_clip = std::stof(val);
+        else if (key == "history_steps") cfg.history_steps = static_cast<std::size_t>(std::stoul(val));
+        else if (key == "obs_size") cfg.obs_size = std::stoi(val);
+        else if (key == "kp") cfg.kp = std::stof(val);
+        else if (key == "kd") cfg.kd = std::stof(val);
+        else if (key == "dft_dof_pos") parse_list<float, 12>(val, cfg.dft_dof_pos);
+        else if (key == "joint_idx_sdk2policy") parse_list<int, 12>(val, cfg.joint_idx_sdk2policy);
+    }
+    compute_pol2rob_from_sdk2policy(cfg.joint_idx_sdk2policy, cfg.joint_idx_policy2sdk);
+    if (ok) *ok = true;
+    return cfg;
+}
+
+void BaseRobotControl::controlLoop()
+{
+    RobotObsResult res = getRobotObs();
+
+    const int frame = obs_cfg_.obs_size;
+    const std::size_t total = static_cast<std::size_t>(frame) * std::max<std::size_t>(obs_cfg_.history_steps, std::size_t(1));
+
+    // 使用整段历史作为输入
+    std::vector<float> obs(res.his_obs.begin(), res.his_obs.begin() + total);
+    std::vector<float> outputs;
+
+    if (runOnnxInference(obs, outputs)) {
+        // 打印 1x12 输出
+        static uint64_t policy_cnt = 0;
+        if ((++policy_cnt % 50) == 0) {
+            std::cout << "ONNX infer out: ";
+            for (int i = 0; i < 12; ++i) {
+                std::cout << outputs[i] << ", ";
+                last_act_[i] = outputs[i];
+            }
+            std::cout << std::endl;
+        }
+        // 将策略顺序的动作映射到机器人关节顺序
+        std::array<double, 12> joint_positions{};
+        for (int r = 0; r < 12; ++r) {
+            int p = obs_cfg_.joint_idx_policy2sdk[r];
+            // todo: add hip_reduction config
+            joint_positions[r] = static_cast<double>(outputs[p]) * obs_cfg_.act_scale + obs_cfg_.dft_dof_pos[r];
+        }
+        applyPositionControl(joint_positions);
+    }
+}
+
+void BaseRobotControl::setObsConfig(const PolicyConfig& cfg) 
+{
+    obs_cfg_ = cfg;
+    compute_pol2rob_from_sdk2policy(obs_cfg_.joint_idx_sdk2policy, obs_cfg_.joint_idx_policy2sdk);
+    ensureObsBuffers();
+}
+
+void BaseRobotControl::loadOnnxModel(const std::string& onnx_path) 
+{
+    try {
+        ort_env_ = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "robot_policy");
+        Ort::SessionOptions opt;
+        opt.SetIntraOpNumThreads(1);
+        opt.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
+
+        ort_session_ = std::make_unique<Ort::Session>(*ort_env_, onnx_path.c_str(), opt);
+
+        Ort::AllocatorWithDefaultOptions allocator;
+        ort_input_names_str_.emplace_back(ort_session_->GetInputNameAllocated(0, allocator).get());
+        ort_output_names_str_.emplace_back(ort_session_->GetOutputNameAllocated(0, allocator).get());
+        ort_input_names_ = {ort_input_names_str_[0].c_str()};
+        ort_output_names_ = {ort_output_names_str_[0].c_str()};
+        onnx_ready_ = true;
+        std::cout << "ONNX loaded: " << onnx_path
+                  << " input=" << ort_input_names_str_[0]
+                  << " output=" << ort_output_names_str_[0] << std::endl;
+    } catch (const Ort::Exception& e) {
+        std::cerr << "ONNX load error: " << e.what() << " path=" << onnx_path << std::endl;
+        ort_session_.reset();
+        onnx_ready_ = false;
+    }
+}
+
+bool BaseRobotControl::runOnnxInference(const std::vector<float>& input, std::vector<float>& output) 
+{
+    if (!onnx_ready_ || !ort_session_) {
+        std::cerr << "[BaseRobotControl] ONNX session not ready." << std::endl;
+        return false;
+    }
+
+    try {
+        const std::array<int64_t, 2> input_shape{1, static_cast<int64_t>(input.size())};
+        Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
+        Ort::Value input_tensor = Ort::Value::CreateTensor<float>(mem, const_cast<float*>(input.data()),
+                                                                  input.size(), input_shape.data(), input_shape.size());
+
+        auto outputs = ort_session_->Run(Ort::RunOptions{nullptr},
+                                         ort_input_names_.data(), &input_tensor, 1,
+                                         ort_output_names_.data(), 1);
+
+        if (outputs.empty() || !outputs[0].IsTensor()) {
+            std::cerr << "[BaseRobotControl] ONNX inference failed: empty or non-tensor output." << std::endl;
+            return false;
+        }
+
+        float* out = outputs[0].GetTensorMutableData<float>();
+        output.assign(out, out + outputs[0].GetTensorTypeAndShapeInfo().GetElementCount());
+        return true;
+    } catch (const Ort::Exception& e) {
+        std::cerr << "[BaseRobotControl] ONNX runtime error: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+std::array<float, 3> BaseRobotControl::gravFromQuatWxyz(const std::array<float, 4>& q)
+{
+    // Quaternion (w, x, y, z), normalized
+    const float w = q[0], x = -q[1], y = -q[2], z = -q[3];
+
+    // Rotation matrix (body->world). Gravity in world is [0,0,-1].
+    // g_body = R^T * [0,0,-1] = - third column of R
+    const float c0 = -2.0f * (x * z + w * y);
+    const float c1 = -2.0f * (y * z - w * x);
+    const float c2 = -(w * w - x * x - y * y + z * z);
+
+    // Negative of third column
+    return std::array<float, 3>{c0, c1, c2};
+}
+
+void BaseRobotControl::ensureObsBuffers()
+{
+    const std::size_t total = static_cast<std::size_t>(obs_cfg_.obs_size) * std::max<std::size_t>(obs_cfg_.history_steps, 1);
+    his_obs_.assign(total, 0.0f);
+    std::cout << "[SDK1] ensureObsBuffers: obs_size=" << total
+              << " history_steps=" << obs_cfg_.history_steps
+              << " total=" << total << std::endl;
+}

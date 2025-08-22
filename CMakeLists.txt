@@ -81,10 +81,12 @@ endif()
 # 直接构建 node，并把实现源码编进可执行文件
 include_directories(include)
 add_executable(aliengo_node
+  src/base_robot_control.cpp
   src/aliengo_node.cpp
   src/sdk1_robot_control.cpp
 )
 add_executable(go2_node
+  src/base_robot_control.cpp
   src/go2_node.cpp
   src/sdk2_robot_control.cpp
 )

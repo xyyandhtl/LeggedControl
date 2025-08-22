@@ -18,67 +18,8 @@ using unitree::robot::ChannelPublisherPtr;
 using unitree::robot::ChannelSubscriber;
 using unitree::robot::ChannelSubscriberPtr;
 
-SDK2PolicyConfig SDK2PolicyConfig::FromFile(const std::string& path, bool* ok) {
-    SDK2PolicyConfig cfg;
-    std::ifstream fin(path);
-    bool good = fin.good();
-    if (!fin) {
-        if (ok) *ok = false;
-        std::cerr << "[SDK2] Config open failed: " << path << std::endl;
-        return cfg;
-    }
-    std::string line;
-    while (std::getline(fin, line)) {
-        // strip comments
-        auto p = line.find_first_of("#;");
-        if (p != std::string::npos) line = line.substr(0, p);
-        p = line.find("//");
-        if (p != std::string::npos) line = line.substr(0, p);
-        line = trim(line);
-        if (line.empty()) continue;
-
-        // split by '=' or ':'
-        size_t sep = line.find('=');
-        if (sep == std::string::npos) sep = line.find(':');
-        if (sep == std::string::npos) continue;
-        std::string key = trim(line.substr(0, sep));
-        std::string val = trim(line.substr(sep + 1));
-
-        if (key == "onnx_model_path") cfg.onnx_model_path = val;
-        else if (key == "act_scale") cfg.act_scale = std::stof(val);
-        else if (key == "vel_scale") cfg.vel_scale = std::stof(val);
-        else if (key == "gyr_scale") cfg.gyr_scale = std::stof(val);
-        else if (key == "dof_pos_scale") cfg.dof_pos_scale = std::stof(val);
-        else if (key == "dof_vel_scale") cfg.dof_vel_scale = std::stof(val);
-        else if (key == "obs_clip") cfg.obs_clip = std::stof(val);
-        else if (key == "history_steps") cfg.history_steps = static_cast<std::size_t>(std::stoul(val));
-        else if (key == "obs_size") cfg.obs_size = std::stoi(val);
-        else if (key == "kp") cfg.kp = std::stof(val);
-        else if (key == "kd") cfg.kd = std::stof(val);
-        else if (key == "dft_dof_pos") {
-            std::cout << "[SDK2]Parseing dft_dof_pos: " << std::endl;
-            if (!parse_list<float, 12>(val, cfg.dft_dof_pos))
-                std::cerr << "[SDK2] parse dft_dof_pos failed, expect 12 floats\n";
-        } else if (key == "joint_idx_sdk2policy") {
-            std::cout << "[SDK2]Parseing joint_idx_sdk2policy: " << std::endl;
-            if (!parse_list<int, 12>(val, cfg.joint_idx_sdk2policy))
-                std::cerr << "[SDK2] parse joint_idx_sdk2policy failed, expect 12 ints\n";
-        }
-    }
-    // Compute inverse mapping (do not load from file)
-    compute_pol2rob_from_sdk2policy(cfg.joint_idx_sdk2policy, cfg.joint_idx_policy2sdk);
-    std::cout << "[SDK2] Computed joint_idx_policy2sdk: ";
-    for (int i = 0; i < 12; ++i) {
-        if (i) std::cout << ", ";
-        std::cout << cfg.joint_idx_policy2sdk[i];
-    }
-    std::cout << std::endl;
-
-    if (ok) *ok = good;
-    return cfg;
-}
-
 SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double timeout_s, bool auto_stand, const std::string& config_path)
+    : BaseRobotControl()
 {
     std::cout << "[SDK2] ctor iface=" << network_interface
               << " timeout_s=" << timeout_s
@@ -116,7 +57,7 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
     // Load config
     config_path_ = config_path;
     bool ok = false;
-    obs_cfg_ = SDK2PolicyConfig::FromFile(config_path, &ok);
+    obs_cfg_ = PolicyConfig::FromFile(config_path, &ok);
     std::cout << "[SDK2] Load config: " << config_path << (ok ? " [OK]" : " [ERR]") << std::endl;
 
     // Ensure buffers
@@ -128,46 +69,7 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
     std::string parent_dir = config_path_.substr(0, pos + 1);
     std::string onnx_path = parent_dir + obs_cfg_.onnx_model_path;
     std::cout << "[SDK2] Load onnx_path: " << onnx_path << std::endl;
-    // Load ONNX in ctor
-    try {
-        ort_env_ = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "him_policy");
-        Ort::SessionOptions opt;
-        opt.SetIntraOpNumThreads(1);
-        opt.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
-
-        ort_session_ = std::make_unique<Ort::Session>(*ort_env_, onnx_path.c_str(), opt);
-
-        // IO names
-        Ort::AllocatorWithDefaultOptions allocator;
-        const size_t in_count = ort_session_->GetInputCount();
-        const size_t out_count = ort_session_->GetOutputCount();
-        if (in_count == 0 || out_count == 0) {
-            std::cerr << "NNX: invalid IO count (in=" << in_count
-                      << ", out=" << out_count << ")" << std::endl;
-            ort_session_.reset();
-            onnx_ready_ = false;
-        } else {
-            {
-                auto name = ort_session_->GetInputNameAllocated(0, allocator);
-                ort_input_names_str_.emplace_back(name.get());
-            }
-            {
-                auto name = ort_session_->GetOutputNameAllocated(0, allocator);
-                ort_output_names_str_.emplace_back(name.get());
-            }
-            ort_input_names_  = { ort_input_names_str_[0].c_str() };
-            ort_output_names_ = { ort_output_names_str_[0].c_str() };
-            onnx_ready_ = true;
-            std::cout << "ONNX loaded: " << obs_cfg_.onnx_model_path
-                      << " input=" << ort_input_names_str_[0]
-                      << " output=" << ort_output_names_str_[0] << std::endl;
-        }
-    } catch (const Ort::Exception& e) {
-        std::cerr << "ONNX load error: " << e.what()
-                  << " path=" << obs_cfg_.onnx_model_path << std::endl;
-        ort_session_.reset();
-        onnx_ready_ = false;
-    }
+    loadOnnxModel(onnx_path);
 
     // Start control loop thread
     // todo: add joystick to reset and begin control loop
@@ -181,74 +83,6 @@ SDK2RobotControl::~SDK2RobotControl()
     std::cout << "[SDK2] dtor: stopping..." << std::endl;
     if (sport_client_) {
         sport_client_->StopMove();
-    }
-}
-
-void SDK2RobotControl::controlLoop()
-{
-    SDK2RobotObsResult res = getRobotObs();
-
-    const int frame = obs_cfg_.obs_size;
-    const std::size_t total = static_cast<std::size_t>(frame) * std::max<std::size_t>(obs_cfg_.history_steps, std::size_t(1));
-    if (res.his_obs.size() < total) {
-        std::cerr << "ONNX infer: his_obs size too small: " << res.his_obs.size()
-                  << " < " << total << std::endl;
-        return;
-    }
-    if (!onnx_ready_ || !ort_session_) {
-        std::cerr << "ONNX infer: session not ready." << std::endl;
-        return;
-    }
-
-    // 使用整段历史作为输入
-    std::vector<float> obs(res.his_obs.begin(), res.his_obs.begin() + total);
-
-    try {
-        std::array<int64_t, 2> input_shape{1, static_cast<int64_t>(total)};
-        Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
-        Ort::Value input_tensor = Ort::Value::CreateTensor<float>(mem, obs.data(),
-                                                                  obs.size(), input_shape.data(), input_shape.size());
-
-        auto outputs = ort_session_->Run(Ort::RunOptions{nullptr},
-                                         ort_input_names_.data(), &input_tensor, 1,
-                                         ort_output_names_.data(), 1);
-
-        if (outputs.empty() || !outputs[0].IsTensor()) {
-            std::cerr << "ONNX infer: empty or non-tensor output" << std::endl;
-            return;
-        }
-
-        float* out = outputs[0].GetTensorMutableData<float>();
-
-        // 打印 1x12 输出
-        static uint64_t policy_cnt = 0;
-        if ((++policy_cnt % 50) == 0) {
-            std::cout << "ONNX infer out: ";
-            for (int i = 0; i < 12; ++i) {
-                if (i) std::cout << ", ";
-                std::cout << out[i];
-            }
-            std::cout << std::endl;
-        }
-
-        // 保存原始策略动作（policy 顺序）到 last_act_
-        for (int i = 0; i < 12; ++i) {
-            // todo: add act clip
-            last_act_[i] = out[i];
-        }
-
-        // 将策略顺序的动作映射到机器人关节顺序
-        std::array<double, 12> joint_positions{};
-        for (int r = 0; r < 12; ++r) {
-            int p = obs_cfg_.joint_idx_policy2sdk[r];
-            // todo: add hip_reduction config
-            joint_positions[r] = static_cast<double>(out[p]) * obs_cfg_.act_scale + obs_cfg_.dft_dof_pos[r];
-        }
-
-        applyPositionControl(joint_positions);
-    } catch (const Ort::Exception& e) {
-        std::cerr << "ONNX runtime error: " << e.what() << std::endl;
-        return;
     }
 }
 
@@ -282,7 +116,7 @@ void SDK2RobotControl::applyPositionControl(const std::array<double, 12> &joint_
     setControlMode(ControlMode::LowLevel);
     // 写入目标并由后台循环持续发布
     // std::lock_guard<std::mutex> lk(low_cmd_mtx_);
-    for (int i = 0; i < 12; ++i) {
+    for (int i = 0; i < 12; i++) {
         low_cmd_.motor_cmd()[i].mode() = 0x01; // PMSM 伺服
         low_cmd_.motor_cmd()[i].q()    = static_cast<float>(joint_positions[i]);
         low_cmd_.motor_cmd()[i].dq()   = 0.0f;
@@ -303,15 +137,7 @@ void SDK2RobotControl::applyVelCmdControl(double vx, double vy, double wz)
     last_cmd_[2] = static_cast<float>(wz);
 }
 
-// ---- methods for observations ----
-void SDK2RobotControl::setObsConfig(const SDK2PolicyConfig& cfg)
-{
-    obs_cfg_ = cfg;
-    compute_pol2rob_from_sdk2policy(obs_cfg_.joint_idx_sdk2policy, obs_cfg_.joint_idx_policy2sdk);
-    ensureObsBuffers();
-}
-
-SDK2RobotObsResult SDK2RobotControl::getRobotObs()
+const BaseRobotControl::RobotObsResult SDK2RobotControl::getRobotObs()
 {
     unitree_go::msg::dds_::LowState_ state_copy{};
     {
@@ -396,7 +222,7 @@ SDK2RobotObsResult SDK2RobotControl::getRobotObs()
     }
     std::memcpy(his_obs_.data(), obs.data(), sizeof(float) * frame);
 
-    SDK2RobotObsResult res;
+    RobotObsResult res;
     res.his_obs = his_obs_; // return a copy
 
     static uint64_t obs_cnt = 0;
@@ -451,32 +277,6 @@ int SDK2RobotControl::stopMove()
     return ret;
 }
 
-std::array<float, 3> SDK2RobotControl::gravFromQuatWxyz(const std::array<float, 4>& q)
-{
-    // Quaternion (w, x, y, z), normalized
-    const float w = q[0], x = -q[1], y = -q[2], z = -q[3];
-
-    // Rotation matrix (body->world). Gravity in world is [0,0,-1].
-    // g_body = R^T * [0,0,-1] = - third column of R
-    const float c0 = -2.0f * (x * z + w * y);
-    const float c1 = -2.0f * (y * z - w * x);
-    const float c2 = -(w * w - x * x - y * y + z * z);
-
-    // Negative of third column
-    return std::array<float, 3>{c0, c1, c2};
-}
-
-void SDK2RobotControl::ensureObsBuffers()
-{
-    // const int obs_size = 3 + 3 + 3 + 12 + 12 + 12;
-    // obs_cfg_.obs_size = obs_size;
-    const std::size_t total = static_cast<std::size_t>(obs_cfg_.obs_size) * std::max<std::size_t>(obs_cfg_.history_steps, 1);
-    his_obs_.assign(total, 0.0f);
-    std::cout << "[SDK2] ensureObsBuffers: obs_size=" << total
-              << " history_steps=" << obs_cfg_.history_steps
-              << " total=" << total << std::endl;
-}
-
 void SDK2RobotControl::initLowCmd()
 {
     // 参考官方示例
@@ -498,7 +298,6 @@ void SDK2RobotControl::initLowCmd()
 
 void SDK2RobotControl::onLowStateMessage(const void* msg)
 {
-    static uint64_t ls_cnt = 0;
     std::lock_guard<std::mutex> lk(low_state_mtx_);
     low_state_ = *reinterpret_cast<const unitree_go::msg::dds_::LowState_*>(msg);
 }
