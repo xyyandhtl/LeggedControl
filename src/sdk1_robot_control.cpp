@@ -159,6 +159,9 @@ void SDK1RobotControl::applyVelCmdControl(double vx, double vy, double wz)
 
 const BaseRobotControl::RobotObsResult SDK1RobotControl::getRobotObs()
 {
+    // If test non-ros, uncomment this line
+    // applyVelCmdControl(key_data_.ly * max_vx_, key_data_.lx * max_vy_, key_data_.rx * max_wz_);
+
     LowState state_copy = {0};
     {
         std::lock_guard<std::mutex> lk(low_state_mtx_);

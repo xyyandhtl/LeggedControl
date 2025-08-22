@@ -7,7 +7,7 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include "sdk2_robot_control.h"
 
-namespace unitree_control
+namespace legged_control
 {
 
 class VelocityNode : public rclcpp::Node
@@ -108,12 +108,12 @@ private:
     double stale_timeout_s_;
 };
 
-}  // namespace unitree_control
+}  // namespace legged_control
 
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<unitree_control::VelocityNode>();
+    auto node = std::make_shared<legged_control::VelocityNode>();
     rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;

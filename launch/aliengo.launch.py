@@ -5,7 +5,7 @@ from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
-    package_path = get_package_share_directory('unitree_control')
+    package_path = get_package_share_directory('legged_control')
     config_file_path = PathJoinSubstitution([package_path, 'config', 'sdk1_config.ini'])
 
     target_ip_arg = DeclareLaunchArgument(
@@ -33,7 +33,7 @@ def generate_launch_description():
     max_wz_arg = DeclareLaunchArgument('max_wz', default_value='0.8')
     
     node = Node(
-        package='unitree_control',
+        package='legged_control',
         executable='aliengo_node',
         name='aliengo_node',
         output='screen',

@@ -5,7 +5,7 @@ from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
-    package_path = get_package_share_directory('unitree_control')
+    package_path = get_package_share_directory('legged_control')
     config_file_path = PathJoinSubstitution([package_path, 'config', 'sdk2_config.ini'])
 
     network_interface_arg = DeclareLaunchArgument(
@@ -33,7 +33,7 @@ def generate_launch_description():
     max_wz_arg = DeclareLaunchArgument('max_wz', default_value='1.5')
 
     node = Node(
-        package='unitree_control',
+        package='legged_control',
         executable='go2_node',
         name='go2_node',
         output='screen',
