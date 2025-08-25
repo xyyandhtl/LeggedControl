@@ -159,8 +159,9 @@ void SDK1RobotControl::applyVelCmdControl(double vx, double vy, double wz)
 
 const BaseRobotControl::RobotObsResult SDK1RobotControl::getRobotObs()
 {
-    // If test non-ros, uncomment this line
-    // applyVelCmdControl(key_data_.ly * max_vx_, key_data_.lx * max_vy_, key_data_.rx * max_wz_);
+    if (standalone_) {
+        applyVelCmdControl(key_data_.ly * 1.0, key_data_.lx * 0.5, key_data_.rx * 1.0);
+    }
 
     LowState state_copy = {0};
     {
@@ -290,4 +291,3 @@ xRockerBtnDataStruct SDK1RobotControl::getJoystickData() const
 {
     return key_data_;
 }
-

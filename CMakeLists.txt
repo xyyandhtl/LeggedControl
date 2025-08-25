@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 选项
 option(BUILD_EXAMPLES "Build example programs" ON)
-# 新增：ONNX Runtime EP 选择
+# ONNX Runtime EP 选择
 option(ENABLE_ORT_CUDA "Enable ONNX Runtime CUDA Execution Provider" OFF)
 option(ENABLE_ORT_TENSORRT "Enable ONNX Runtime TensorRT Execution Provider" OFF)
 
@@ -65,7 +65,7 @@ target_link_libraries(unitree_sdk2 INTERFACE
   dl
 )
 
-# 新增：按需启用 ORT 的 CUDA/TensorRT Provider 并定义编译宏
+# 按需启用 ORT 的 CUDA/TensorRT Provider 并定义编译宏
 set(ORT_PROVIDER_LIBS "")
 if(ENABLE_ORT_CUDA)
   list(APPEND ORT_PROVIDER_LIBS ${UNITREE_LIB_PATH}/libonnxruntime_providers_cuda.so)
@@ -91,16 +91,24 @@ endif()
 # 直接构建 node，并把实现源码编进可执行文件
 include_directories(include)
 add_executable(aliengo_node
-  src/base_robot_control.cpp
   src/aliengo_node.cpp
+  src/base_robot_control.cpp
   src/sdk1_robot_control.cpp
 )
 add_executable(go2_node
-  src/base_robot_control.cpp
   src/go2_node.cpp
+  src/base_robot_control.cpp
   src/sdk2_robot_control.cpp
 )
 
+# 非 ROS2 独立运行的可执行文件
+add_executable(aliengo_standalone
+  src/standalone/aliengo.cpp
+  src/base_robot_control.cpp
+  src/sdk1_robot_control.cpp
+)
+
+# ament依赖
 ament_target_dependencies(aliengo_node
   rclcpp
   geometry_msgs
@@ -114,23 +122,27 @@ ament_target_dependencies(go2_node
   sensor_msgs
 )
 
-# 新增：为包含 EP 代码的目标定义编译宏（用于 #ifdef ORT_WITH_*）
+# 为包含 EP 代码的目标定义编译宏（用于 #ifdef ORT_WITH_*）
 if(ENABLE_ORT_CUDA)
   target_compile_definitions(aliengo_node PRIVATE ORT_WITH_CUDA)
+  target_compile_definitions(aliengo_standalone PRIVATE ORT_WITH_CUDA)
   target_compile_definitions(go2_node    PRIVATE ORT_WITH_CUDA)
 endif()
 if(ENABLE_ORT_TENSORRT)
   target_compile_definitions(aliengo_node PRIVATE ORT_WITH_TENSORRT)
+  target_compile_definitions(aliengo_standalone PRIVATE ORT_WITH_TENSORRT)
   target_compile_definitions(go2_node    PRIVATE ORT_WITH_TENSORRT)
 endif()
 
 # 直接从可执行目标进行链接
-target_link_libraries(aliengo_node unitree_sdk1)  # 移除 ${TORCH_LIBRARIES} 和重复的 onnxruntime
+target_link_libraries(aliengo_node unitree_sdk1)
+target_link_libraries(aliengo_standalone unitree_sdk1)
 target_link_libraries(go2_node    unitree_sdk2)
 
 # 运行时库搜索路径
 if(UNIX AND NOT APPLE)
   target_link_options(aliengo_node PRIVATE -Wl,-rpath,${UNITREE_LIB_PATH})
+  target_link_options(aliengo_standalone PRIVATE -Wl,-rpath,${UNITREE_LIB_PATH})
   target_link_options(go2_node PRIVATE -Wl,-rpath,${UNITREE_LIB_PATH})
 endif()
 

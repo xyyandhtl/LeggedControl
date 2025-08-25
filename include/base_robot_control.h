@@ -61,7 +61,10 @@ public:
     void setObsConfig(const PolicyConfig& cfg);
     
     std::array<float, 3> gravFromQuatWxyz(const std::array<float, 4>& q);
+    // Onnx inference
     bool runOnnxInference(const std::vector<float>& input, std::vector<float>& output);
+    // If non-ros, set standalone mode
+    void setStandalone(bool standalone) { standalone_ = standalone; }
 
 protected:
     std::string config_path_;
@@ -78,6 +81,7 @@ protected:
     std::vector<std::string> ort_output_names_str_;
     bool onnx_ready_ = false;
 
+    bool standalone_ = false;
     float control_dt_ = 0.002;
     std::mutex low_state_mtx_;
     std::mutex low_cmd_mtx_;
