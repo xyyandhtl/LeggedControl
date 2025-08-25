@@ -8,6 +8,8 @@
 #include <unitree/robot/channel/channel_subscriber.hpp>
 #include <unitree/idl/go2/LowState_.hpp>
 #include <unitree/idl/go2/LowCmd_.hpp>
+#include "unitree/idl/go2/WirelessController_.hpp"
+#include <unitree/robot/channel/channel_subscriber.hpp>
 #include <unitree/robot/go2/sport/sport_client.hpp>
 #include <unitree/robot/b2/motion_switcher/motion_switcher_client.hpp>
 
@@ -32,18 +34,24 @@ public:
     void setControlMode(ControlMode mode);
     ControlMode controlMode() const { return mode_; }
 
+    void initJoystick(const std::string &network_interface);
+
 private:
     // Topics
     static constexpr const char* TOPIC_LOWSTATE = "rt/lowstate";
     static constexpr const char* TOPIC_LOWCMD   = "rt/lowcmd";
+    static constexpr const char* TOPIC_JOYSTICK = "rt/wirelesscontroller";
 
     // Low-level channels
     unitree::robot::ChannelPublisherPtr<unitree_go::msg::dds_::LowCmd_> lowcmd_pub_;
     unitree::robot::ChannelSubscriberPtr<unitree_go::msg::dds_::LowState_> lowstate_sub_;
+    unitree::robot::ChannelSubscriberPtr<unitree_go::msg::dds_::WirelessController_> joystick_sub_;
 
     // Low-level messages
     unitree_go::msg::dds_::LowCmd_ low_cmd_{};
     unitree_go::msg::dds_::LowState_ low_state_{};
+    unitree_go::msg::dds_::WirelessController_ key_data_;
+    // std::mutex joystick_mtx_;
 
     // High-level client
     std::unique_ptr<unitree::robot::go2::SportClient> sport_client_;
@@ -60,6 +68,13 @@ private:
     ControlMode mode_ = ControlMode::HighLevel;
     std::thread lowcmd_loop_;
     std::atomic<bool> lowcmd_loop_running_{false};
+
+    float joystick_smooth_ = 0.03f;
+    float joystick_dead_zone_ = 0.01f;
+    float joystick_lx_ = 0.0f;
+    float joystick_ly_ = 0.0f;
+    float joystick_rx_ = 0.0f;
+    float joystick_ry_ = 0.0f;
 
     void onLowStateMessage(const void* msg);
 

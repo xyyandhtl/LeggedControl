@@ -25,8 +25,10 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
               << " timeout_s=" << timeout_s
               << " auto_stand=" << (auto_stand ? "true" : "false") << std::endl;
 
+    // SDK2 初始化开始
     ChannelFactory::Instance()->Init(0, network_interface.c_str());
 
+    // HighLevel(SportClient) 初始化
     sport_client_ = std::make_unique<unitree::robot::go2::SportClient>();
     sport_client_->SetTimeout(static_cast<float>(timeout_s));
     sport_client_->Init();
@@ -37,7 +39,7 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
         std::cout << "[SDK2] Auto StandUp return code: " << res << std::endl;
     }
 
-    // 低层发布/订阅初始化
+    // LowLevel(LowCmd/LowState) 初始化
     lowcmd_pub_.reset(new ChannelPublisher<unitree_go::msg::dds_::LowCmd_>(TOPIC_LOWCMD));
     lowcmd_pub_->InitChannel();
     std::cout << "[SDK2] LowCmd publisher initialized: " << TOPIC_LOWCMD << std::endl;
@@ -45,12 +47,28 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
     lowstate_sub_.reset(new ChannelSubscriber<unitree_go::msg::dds_::LowState_>(TOPIC_LOWSTATE));
     lowstate_sub_->InitChannel(std::bind(&SDK2RobotControl::onLowStateMessage, this, std::placeholders::_1), 1);
 
-    // 不在构造函数中释放高层模式，默认以 HighLevel 启动，便于调用 SportClient  // todo: fix this bug
+    // ModeSwitcher 初始化
     msc_ = std::make_unique<unitree::robot::b2::MotionSwitcherClient>();
     msc_->SetTimeout(static_cast<float>(timeout_s));
     msc_->Init();
 
-    // // 初始化低层命令
+    // Joystick 初始化
+    joystick_sub_.reset(new unitree::robot::ChannelSubscriber<unitree_go::msg::dds_::WirelessController_>(TOPIC_JOYSTICK));
+    joystick_sub_->InitChannel([this](const void *msg) {
+        key_data_ = *reinterpret_cast<const unitree_go::msg::dds_::WirelessController_ *>(msg);
+        joystick_lx_ = joystick_lx_ * (1 - joystick_smooth_) + 
+                       (std::fabs(key_data_.lx()) < joystick_dead_zone_ ? 0.0f : key_data_.lx()) * joystick_smooth_;
+        joystick_ly_ = joystick_ly_ * (1 - joystick_smooth_) + 
+                       (std::fabs(key_data_.ly()) < joystick_dead_zone_ ? 0.0f : key_data_.ly()) * joystick_smooth_;
+        joystick_rx_ = joystick_rx_ * (1 - joystick_smooth_) + 
+                       (std::fabs(key_data_.rx()) < joystick_dead_zone_ ? 0.0f : key_data_.rx()) * joystick_smooth_;
+        joystick_ry_ = joystick_ry_ * (1 - joystick_smooth_) + 
+                       (std::fabs(key_data_.ry()) < joystick_dead_zone_ ? 0.0f : key_data_.ry()) * joystick_smooth_;
+    }, 1);
+    std::cout << "[SDK2] Joystick initialized with smooth=" << joystick_smooth_ 
+              << " and dead_zone=" << joystick_dead_zone_ << std::endl;
+
+    // 类变量初始化
     initLowCmd();
     std::cout << "[SDK2] initLowCmd done" << std::endl;
 
@@ -139,6 +157,10 @@ void SDK2RobotControl::applyVelCmdControl(double vx, double vy, double wz)
 
 const BaseRobotControl::RobotObsResult SDK2RobotControl::getRobotObs()
 {
+    if (standalone_) {
+        applyVelCmdControl(joystick_ly_ * 1.0, joystick_lx_ * 0.5, joystick_rx_ * 1.0);
+    }
+
     unitree_go::msg::dds_::LowState_ state_copy{};
     {
         std::lock_guard<std::mutex> lk(low_state_mtx_);
