@@ -4,7 +4,7 @@ import torch
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--jit", type=str, default="/home/lenovo/Projects/himloco/legged_gym/logs/flat_aliengo/base/exported/policy.pt", help="input TorchScript .pt")
+    p.add_argument("--jit", type=str, default="/home/lenovo/Projects/himloco/legged_gym/logs/stairs_aliengo/amp_0806/exported/policy.pt", help="input TorchScript .pt")
     p.add_argument("--onnx", type=str, default="policy.onnx", help="output ONNX path")
     p.add_argument("--obs-dim", type=int, default=270, help="observation dimension (per-frame)")
     p.add_argument("--opset", type=int, default=14, help="ONNX opset version")

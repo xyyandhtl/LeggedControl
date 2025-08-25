@@ -23,11 +23,11 @@ public:
         uint16_t tanget_port = this->declare_parameter<uint16_t>("target_port", 8007);
 
         int control_rate_hz = this->declare_parameter<int>("control_rate_hz", 50);
-        double stale_timeout_s = this->declare_parameter<double>("stale_timeout_s", 1.0);
+        float stale_timeout_s = this->declare_parameter<float>("stale_timeout_s", 1.0);
 
-        max_vx_ = this->declare_parameter<double>("max_vx", 2.0);
-        max_vy_ = this->declare_parameter<double>("max_vy", 1.0);
-        max_wz_ = this->declare_parameter<double>("max_wz", 1.0);
+        max_vx_ = this->declare_parameter<float>("max_vx", 2.0);
+        max_vy_ = this->declare_parameter<float>("max_vy", 1.0);
+        max_wz_ = this->declare_parameter<float>("max_wz", 1.0);
         stale_timeout_s_ = stale_timeout_s;
 
         std::string config_path = this->declare_parameter<std::string>("config_path", "");
@@ -51,7 +51,7 @@ public:
     }
 
 private:
-    static double clamp(double value, double min_val, double max_val)
+    static float clamp(float value, float min_val, float max_val)
     {
         return std::max(min_val, std::min(max_val, value));
     }
@@ -82,7 +82,7 @@ private:
         }
 
         const auto now = this->now();
-        const double dt_pos = (now - last_cmd_time_).seconds();
+        const float dt_pos = (now - last_cmd_time_).seconds();
 
         if (dt_pos <= stale_timeout_s_) { // Respond to position commands
             last_vx_ = cmd_vx_;
@@ -109,16 +109,16 @@ private:
     rclcpp::TimerBase::SharedPtr control_timer_;
 
     rclcpp::Time last_cmd_time_;
-    double last_vx_; double last_vy_; double last_wz_;
-    double cmd_vx_; double cmd_vy_; double cmd_wz_;
-    double joy_vx_; double joy_vy_; double joy_wz_;
+    float last_vx_; float last_vy_; float last_wz_;
+    float cmd_vx_; float cmd_vy_; float cmd_wz_;
+    float joy_vx_; float joy_vy_; float joy_wz_;
     bool sent_stop_;
 
-    double max_vx_;
-    double max_vy_;
-    double max_wz_;
-    double stale_timeout_s_;
-    double dt_;
+    float max_vx_;
+    float max_vy_;
+    float max_wz_;
+    float stale_timeout_s_;
+    float dt_;
 };
 
 int main(int argc, char **argv)

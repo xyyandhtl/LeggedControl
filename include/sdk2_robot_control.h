@@ -17,18 +17,18 @@ class SDK2RobotControl : public BaseRobotControl {
 public:
     enum class ControlMode { HighLevel = 0, LowLevel = 1 };
 
-    SDK2RobotControl(const std::string &network_interface, double timeout_s, bool auto_stand, const std::string& config_path);
+    SDK2RobotControl(const std::string &network_interface, float timeout_s, bool auto_stand, const std::string& config_path);
     ~SDK2RobotControl();
 
     // Low-level position control interface (auto-switch to LowLevel)
     // void controlLoop() override;
     void resetJointPosition() override;
-    void applyPositionControl(const std::array<double, 12> &joint_positions) override;
-    void applyVelCmdControl(double vx, double vy, double wz) override;
+    void applyPositionControl(std::vector<float>& joint_positions) override;
+    void applyVelCmdControl(float vx, float vy, float wz) override;
     const RobotObsResult getRobotObs() override;
 
     // High-level velocity control interface (auto-switch to HighLevel)
-    int move(double vx, double vy, double wz);
+    int move(float vx, float vy, float wz);
     int stopMove();
     // Explicitly switch control mode
     void setControlMode(ControlMode mode);

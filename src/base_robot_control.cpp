@@ -52,6 +52,7 @@ BaseRobotControl::PolicyConfig BaseRobotControl::PolicyConfig::FromFile(const st
         else if (key == "obs_clip") cfg.obs_clip = std::stof(val);
         else if (key == "history_steps") cfg.history_steps = static_cast<std::size_t>(std::stoul(val));
         else if (key == "obs_size") cfg.obs_size = std::stoi(val);
+        else if (key == "act_size") cfg.act_size = std::stoi(val);
         else if (key == "kp") cfg.kp = std::stof(val);
         else if (key == "kd") cfg.kd = std::stof(val);
         else if (key == "dft_dof_pos") parse_list<float, 12>(val, cfg.dft_dof_pos);
@@ -85,11 +86,10 @@ void BaseRobotControl::controlLoop()
             std::cout << std::endl;
         }
         // 将策略顺序的动作映射到机器人关节顺序
-        std::array<double, 12> joint_positions{};
-        for (int r = 0; r < 12; ++r) {
+        std::vector<float> joint_positions(obs_cfg_.act_size);
+        for (std::size_t r = 0; r < obs_cfg_.act_size; ++r) {
             int p = obs_cfg_.joint_idx_policy2sdk[r];
-            // todo: add hip_reduction config
-            joint_positions[r] = static_cast<double>(outputs[p]) * obs_cfg_.act_scale + obs_cfg_.dft_dof_pos[r];
+            joint_positions[r] = outputs[p] * obs_cfg_.act_scale + obs_cfg_.dft_dof_pos[r];
         }
         applyPositionControl(joint_positions);
     }
@@ -215,6 +215,7 @@ std::array<float, 3> BaseRobotControl::gravFromQuatWxyz(const std::array<float, 
 
 void BaseRobotControl::ensureObsBuffers()
 {
+    last_act_.assign(obs_cfg_.act_size, 0.0f);
     const std::size_t total = static_cast<std::size_t>(obs_cfg_.obs_size) * std::max<std::size_t>(obs_cfg_.history_steps, 1);
     his_obs_.assign(total, 0.0f);
     std::cout << "[SDK1] ensureObsBuffers: obs_size=" << total

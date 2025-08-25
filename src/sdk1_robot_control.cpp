@@ -83,47 +83,45 @@ SDK1RobotControl::~SDK1RobotControl()
 void SDK1RobotControl::resetJointPosition()
 {
     // Parameters analogous to the Python logic
-    const double max_time = 5.0;       // seconds
-    const double control_freq = 20.0;  // Hz
-    const double act_clip = 0.1;       // rad per step
+    const float max_time = 5.0;       // seconds
+    const float control_freq = 20.0;  // Hz
+    const float act_clip = 0.1;       // rad per step
 
     // 1) Read current joint positions (thread-safe)
-    std::array<double, 12> joint_pos{};
-    std::array<double, 12> dft_dof_pos{};
-    for (int i = 0; i < 12; ++i) {
-        joint_pos[i] = static_cast<double>(state_.motorState[i].q);
-        dft_dof_pos[i] = static_cast<double>(obs_cfg_.dft_dof_pos[i]);
+    std::vector<float> joint_pos(obs_cfg_.act_size);
+    std::vector<float> dft_dof_pos(obs_cfg_.act_size);
+    for (int i = 0; i < obs_cfg_.act_size; ++i) {
+        joint_pos[i] = state_.motorState[i].q;
+        dft_dof_pos[i] = obs_cfg_.dft_dof_pos[i];
         std::cout << "[" << joint_pos[i] << "|" << dft_dof_pos[i] << "], ";
     }
     std::cout << std::endl;
 
     // 2) Compute number of steps based on max delta and act_clip
-    double act_max = 0.0;
-    for (int i = 0; i < 12; ++i) {
-        const double diff = std::abs(joint_pos[i] - dft_dof_pos[i]);
+    float act_max = 0.0;
+    for (int i = 0; i < obs_cfg_.act_size; ++i) {
+        const float diff = std::abs(joint_pos[i] - dft_dof_pos[i]);
         if (diff > act_max) act_max = diff;
     }
     const int num_steps = std::max(1, static_cast<int>(std::ceil(act_max / act_clip)));
-    const auto interval = std::chrono::duration<double>(1.0 / control_freq);
+    const auto interval = std::chrono::duration<float>(1.0 / control_freq);
 
     // 3) Progressive reset with timeout check
     const auto start_time = std::chrono::steady_clock::now();
     for (int step = 0; step < num_steps; ++step) {
         const auto now = std::chrono::steady_clock::now();
-        if (std::chrono::duration<double>(now - start_time).count() > max_time) {
+        if (std::chrono::duration<float>(now - start_time).count() > max_time) {
             std::cerr << "[SDK1] RESET FAILED: timeout after " << max_time << "s" << std::endl;
             break;
         }
-
-        const double ratio = static_cast<double>(step + 1) / static_cast<double>(num_steps);
-        std::array<double, 12> interp{};
-        for (int i = 0; i < 12; ++i) {
+        const float ratio = static_cast<float>(step + 1) / static_cast<float>(num_steps);
+        std::vector<float> interp(obs_cfg_.act_size);
+        for (int i = 0; i < obs_cfg_.act_size; ++i) {
             interp[i] = joint_pos[i] * (1.0 - ratio) + dft_dof_pos[i] * ratio;
             // std::cout << interp[i] << ", ";
         }
         // std::cout << std::endl;
-
-        for (int i = 0; i < 12; i++) {
+        for (int i = 0; i < obs_cfg_.act_size; i++) {
             cmd_.motorCmd[i].q  = interp[i];
             cmd_.motorCmd[i].dq = 0.0;
             cmd_.motorCmd[i].Kp = 80.0;
@@ -134,9 +132,9 @@ void SDK1RobotControl::resetJointPosition()
     }
 }
 
-void SDK1RobotControl::applyPositionControl(const std::array<double, 12> &joint_positions)
+void SDK1RobotControl::applyPositionControl(std::vector<float>& joint_positions)
 {
-    for (int i = 0; i < 12; i++) {
+    for (std::size_t i = 0; i < obs_cfg_.act_size; i++) {
         cmd_.motorCmd[i].q  = joint_positions[i];
         cmd_.motorCmd[i].dq = 0.0;
         cmd_.motorCmd[i].Kp = obs_cfg_.kp;
@@ -150,11 +148,11 @@ void SDK1RobotControl::applyPositionControl(const std::array<double, 12> &joint_
     // cmd_.motorCmd[RL_0].tau = -1.6f;
 }
 
-void SDK1RobotControl::applyVelCmdControl(double vx, double vy, double wz)
+void SDK1RobotControl::applyVelCmdControl(float vx, float vy, float wz)
 {
-    last_cmd_[0] = static_cast<float>(vx);
-    last_cmd_[1] = static_cast<float>(vy);
-    last_cmd_[2] = static_cast<float>(wz);
+    last_cmd_[0] = vx;
+    last_cmd_[1] = vy;
+    last_cmd_[2] = wz;
 }
 
 const BaseRobotControl::RobotObsResult SDK1RobotControl::getRobotObs()
@@ -184,34 +182,33 @@ const BaseRobotControl::RobotObsResult SDK1RobotControl::getRobotObs()
     // 3) grav (3) from quaternion (w,x,y,z)
     std::array<float, 3> grav = gravFromQuatWxyz(state_copy.imu.quaternion);
 
-    // 4) dof_pos (12)
-    std::array<float, 12> dof_pos_sdk{};
-    std::array<float, 12> dof_vel_sdk{};
-    for (int i = 0; i < 12; ++i) {
-        dof_pos_sdk[i] = static_cast<float>(state_copy.motorState[i].q);
-        dof_vel_sdk[i] = static_cast<float>(state_copy.motorState[i].dq);
+    // 4) dof_pos (obs_cfg_.act_size)
+    std::vector<float> dof_pos_sdk(obs_cfg_.act_size);
+    std::vector<float> dof_vel_sdk(obs_cfg_.act_size);
+    for (int i = 0; i < obs_cfg_.act_size; ++i) {
+        dof_pos_sdk[i] = state_copy.motorState[i].q;
+        dof_vel_sdk[i] = state_copy.motorState[i].dq;
     }
     // Subtract default offsets
-    for (int i = 0; i < 12; ++i) {
+    for (int i = 0; i < obs_cfg_.act_size; ++i) {
         dof_pos_sdk[i] -= obs_cfg_.dft_dof_pos[i];
     }
     // Reorder robot->policy using joint_idx_sdk2policy
-    std::array<float, 12> dof_pos{};
-    std::array<float, 12> dof_vel{};
-    for (int pi = 0; pi < 12; ++pi) {
+    std::vector<float> dof_pos(obs_cfg_.act_size);
+    std::vector<float> dof_vel(obs_cfg_.act_size);
+    for (int pi = 0; pi < obs_cfg_.act_size; ++pi) {
         const int ri = obs_cfg_.joint_idx_sdk2policy[pi];
         dof_pos[pi] = dof_pos_sdk[ri] * obs_cfg_.dof_pos_scale;
         dof_vel[pi] = dof_vel_sdk[ri] * obs_cfg_.dof_vel_scale;
     }
 
-    // 5) act (12) in policy order
-    const std::array<float, 12>& act = last_act_;
+    // 5) act in policy order
+    const std::vector<float>& act = last_act_;
 
     // Concatenate into obs
     const int obs_size = obs_cfg_.obs_size;
     std::vector<float> obs;
     obs.reserve(obs_size);
-
     obs.insert(obs.end(), cmd_scaled.begin(), cmd_scaled.end());
     obs.insert(obs.end(), gyr.begin(), gyr.end());
     obs.insert(obs.end(), grav.begin(), grav.end());
@@ -260,12 +257,12 @@ void SDK1RobotControl::udpSend()
     // static uint64_t rec_cnt = 0;
     // if ((++rec_cnt % 500) == 0) {
     //     std::cout << "current joint pos: ";
-    //     for (int i = 0; i < 12; ++i) {
+    //     for (int i = 0; i < obs_cfg_.act_size; ++i) {
     //         std::cout << state_.motorState[i].q << ", ";
     //     }
     //     std::cout << std::endl;
     //     std::cout << "current cmd pos: ";
-    //     for (int i = 0; i < 12; ++i) {
+    //     for (int i = 0; i < obs_cfg_.act_size; ++i) {
     //         std::cout << cmd_.motorCmd[i].q << ", ";
     //     }
     //     std::cout << std::endl;
@@ -278,7 +275,7 @@ void SDK1RobotControl::udpSend()
 
 void SDK1RobotControl::stopMotors()
 {
-    for (int i = 0; i < 12; i++) {
+    for (int i = 0; i < obs_cfg_.act_size; i++) {
         cmd_.motorCmd[i].q = PosStopF;
         cmd_.motorCmd[i].dq = VelStopF;
         cmd_.motorCmd[i].Kp = 0;

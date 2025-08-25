@@ -28,9 +28,9 @@ def generate_launch_description():
         'stale_timeout_s', default_value='0.5',
         description='Stop if no cmd_vel received for this many seconds')
     
-    max_vx_arg = DeclareLaunchArgument('max_vx', default_value='0.8')
+    max_vx_arg = DeclareLaunchArgument('max_vx', default_value='1.0')
     max_vy_arg = DeclareLaunchArgument('max_vy', default_value='0.5')
-    max_wz_arg = DeclareLaunchArgument('max_wz', default_value='0.8')
+    max_wz_arg = DeclareLaunchArgument('max_wz', default_value='1.0')
     
     node = Node(
         package='legged_control',

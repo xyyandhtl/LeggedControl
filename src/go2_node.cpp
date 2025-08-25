@@ -21,14 +21,14 @@ public:
     {
         // Parameters
         std::string network_interface = this->declare_parameter<std::string>("network_interface", "eth0");
-        double timeout_s = this->declare_parameter<double>("timeout_s", 20.0);
+        float timeout_s = this->declare_parameter<float>("timeout_s", 20.0);
         int control_rate_hz = this->declare_parameter<int>("control_rate_hz", 50);
         bool auto_stand = this->declare_parameter<bool>("auto_stand", true);
 
-        max_vx_ = this->declare_parameter<double>("max_vx", 1.5);
-        max_vy_ = this->declare_parameter<double>("max_vy", 0.5);
-        max_wz_ = this->declare_parameter<double>("max_wz", 1.5);
-        stale_timeout_s_ = this->declare_parameter<double>("stale_timeout_s", 0.5);
+        max_vx_ = this->declare_parameter<float>("max_vx", 1.5);
+        max_vy_ = this->declare_parameter<float>("max_vy", 0.5);
+        max_wz_ = this->declare_parameter<float>("max_wz", 1.5);
+        stale_timeout_s_ = this->declare_parameter<float>("stale_timeout_s", 0.5);
 
         std::string config_path = this->declare_parameter<std::string>("config_path", "");
         robot_control_ = std::make_unique<SDK2RobotControl>(network_interface, timeout_s, auto_stand, config_path);
@@ -48,7 +48,7 @@ public:
     }
 
 private:
-    static double clamp(double value, double min_val, double max_val)
+    static float clamp(float value, float min_val, float max_val)
     {
         return std::max(min_val, std::min(max_val, value));
     }
@@ -65,7 +65,7 @@ private:
     void controlLoop()
     {
         const auto now = this->now();
-        const double dt = (now - last_cmd_time_).seconds();
+        const float dt = (now - last_cmd_time_).seconds();
 
         if (dt <= stale_timeout_s_) {
             // Continue sending Move commands to maintain motion
@@ -96,16 +96,16 @@ private:
     rclcpp::TimerBase::SharedPtr control_timer_;
 
     rclcpp::Time last_cmd_time_;
-    double last_vx_;
-    double last_vy_;
-    double last_wz_;
+    float last_vx_;
+    float last_vy_;
+    float last_wz_;
     bool sent_stop_;
     bool high_level_;
 
-    double max_vx_;
-    double max_vy_;
-    double max_wz_;
-    double stale_timeout_s_;
+    float max_vx_;
+    float max_vy_;
+    float max_wz_;
+    float stale_timeout_s_;
 };
 
 }  // namespace legged_control

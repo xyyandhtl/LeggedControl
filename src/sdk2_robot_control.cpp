@@ -9,8 +9,8 @@
 #include "utils.h"
 
 // 常量与示例一致
-static constexpr double PosStopF = (2.146E+9f);
-static constexpr double VelStopF = (16000.0f);
+static constexpr float PosStopF = (2.146E+9f);
+static constexpr float VelStopF = (16000.0f);
 
 using unitree::robot::ChannelFactory;
 using unitree::robot::ChannelPublisher;
@@ -18,7 +18,7 @@ using unitree::robot::ChannelPublisherPtr;
 using unitree::robot::ChannelSubscriber;
 using unitree::robot::ChannelSubscriberPtr;
 
-SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double timeout_s, bool auto_stand, const std::string& config_path)
+SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, float timeout_s, bool auto_stand, const std::string& config_path)
     : BaseRobotControl()
 {
     std::cout << "[SDK2] ctor iface=" << network_interface
@@ -30,7 +30,7 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
 
     // HighLevel(SportClient) 初始化
     sport_client_ = std::make_unique<unitree::robot::go2::SportClient>();
-    sport_client_->SetTimeout(static_cast<float>(timeout_s));
+    sport_client_->SetTimeout(timeout_s);
     sport_client_->Init();
     std::cout << "[SDK2] SportClient initialized" << std::endl;
 
@@ -49,7 +49,7 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, double 
 
     // ModeSwitcher 初始化
     msc_ = std::make_unique<unitree::robot::b2::MotionSwitcherClient>();
-    msc_->SetTimeout(static_cast<float>(timeout_s));
+    msc_->SetTimeout(timeout_s);
     msc_->Init();
 
     // Joystick 初始化
@@ -107,36 +107,36 @@ SDK2RobotControl::~SDK2RobotControl()
 void SDK2RobotControl::resetJointPosition()
 {
     const int steps = 200; // 2 seconds at 10ms intervals
-    const double interval = 0.01; // 10ms
-    std::array<double, 12> current_positions{};
-    std::array<double, 12> target_positions{};
+    const float interval = 0.01; // 10ms
+    std::vector<float> current_positions(obs_cfg_.act_size);
+    std::vector<float> target_positions(obs_cfg_.act_size);
     
     // Initialize current and target positions
-    for (int i = 0; i < 12; ++i) {
+    for (int i = 0; i < obs_cfg_.act_size; ++i) {
         current_positions[i] = low_state_.motor_state()[i].q();
-        target_positions[i] = static_cast<double>(obs_cfg_.dft_dof_pos[i]);
+        target_positions[i] = obs_cfg_.dft_dof_pos[i];
     }
 
     for (int step = 0; step <= steps; ++step) {
-        std::array<double, 12> interpolated_positions{};
-        for (int i = 0; i < 12; ++i) {
+        std::vector<float> interpolated_positions(obs_cfg_.act_size);
+        for (int i = 0; i < obs_cfg_.act_size; ++i) {
             interpolated_positions[i] = current_positions[i] + 
-                (target_positions[i] - current_positions[i]) * (static_cast<double>(step) / steps);
+                (target_positions[i] - current_positions[i]) * (static_cast<float>(step) / steps);
         }
         applyPositionControl(interpolated_positions);
         std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(interval * 1000)));
     }
 }
 
-void SDK2RobotControl::applyPositionControl(const std::array<double, 12> &joint_positions)
+void SDK2RobotControl::applyPositionControl(std::vector<float>& joint_positions)
 {
     // 切换到低层
     setControlMode(ControlMode::LowLevel);
     // 写入目标并由后台循环持续发布
     // std::lock_guard<std::mutex> lk(low_cmd_mtx_);
-    for (int i = 0; i < 12; i++) {
+    for (std::size_t i = 0; i < obs_cfg_.act_size; i++) {
         low_cmd_.motor_cmd()[i].mode() = 0x01; // PMSM 伺服
-        low_cmd_.motor_cmd()[i].q()    = static_cast<float>(joint_positions[i]);
+        low_cmd_.motor_cmd()[i].q()    = joint_positions[i];
         low_cmd_.motor_cmd()[i].dq()   = 0.0f;
         low_cmd_.motor_cmd()[i].kp()   = obs_cfg_.kp;
         low_cmd_.motor_cmd()[i].kd()   = obs_cfg_.kd;
@@ -147,12 +147,12 @@ void SDK2RobotControl::applyPositionControl(const std::array<double, 12> &joint_
     // todo: add go2w wheel control
 }
 
-void SDK2RobotControl::applyVelCmdControl(double vx, double vy, double wz)
+void SDK2RobotControl::applyVelCmdControl(float vx, float vy, float wz)
 {
     // Store last velocity command for observations
-    last_cmd_[0] = static_cast<float>(vx);
-    last_cmd_[1] = static_cast<float>(vy);
-    last_cmd_[2] = static_cast<float>(wz);
+    last_cmd_[0] = vx;
+    last_cmd_[1] = vy;
+    last_cmd_[2] = wz;
 }
 
 const BaseRobotControl::RobotObsResult SDK2RobotControl::getRobotObs()
@@ -190,37 +190,36 @@ const BaseRobotControl::RobotObsResult SDK2RobotControl::getRobotObs()
     }
     std::array<float, 3> grav = gravFromQuatWxyz(q);
 
-    // 4) dof pos/vel (12) todo: 12 -> 16
-    std::array<float, 12> dof_pos_sdk{};
-    std::array<float, 12> dof_vel_sdk{};
+    // 4) dof pos/vel (obs_cfg_.act_size) todo: 12 -> 16
+    std::vector<float> dof_pos_sdk(obs_cfg_.act_size);
+    std::vector<float> dof_vel_sdk(obs_cfg_.act_size);
     const auto& ms = state_copy.motor_state();
-    // const int n = std::min<int>(12, ms.size());
-    for (int i = 0; i < 12; ++i) {
+    // const int n = std::min<int>(obs_cfg_.act_size, ms.size());
+    for (int i = 0; i < obs_cfg_.act_size; ++i) {
         dof_pos_sdk[i] = ms[i].q();
         dof_vel_sdk[i] = ms[i].dq();
     }
     // Subtract default offsets
-    for (int i = 0; i < 12; ++i) {
+    for (int i = 0; i < obs_cfg_.act_size; ++i) {
         dof_pos_sdk[i] -= obs_cfg_.dft_dof_pos[i];
     }
     // Reorder robot->policy using joint_idx_sdk2policy
-    std::array<float, 12> dof_pos{};
-    std::array<float, 12> dof_vel{};
-    for (int pi = 0; pi < 12; ++pi) {
+    std::vector<float> dof_pos(obs_cfg_.act_size);
+    std::vector<float> dof_vel(obs_cfg_.act_size);
+    for (int pi = 0; pi < obs_cfg_.act_size; ++pi) {
         const int ri = obs_cfg_.joint_idx_sdk2policy[pi];
         // const int ri_clamped = std::clamp(ri, 0, 11);
         dof_pos[pi] = dof_pos_sdk[ri] * obs_cfg_.dof_pos_scale;
         dof_vel[pi] = dof_vel_sdk[ri] * obs_cfg_.dof_vel_scale;
     }
 
-    // 5) act (12) in policy order
-    const std::array<float, 12>& act = last_act_;
+    // 5) act (obs_cfg_.act_size) in policy order
+    const std::vector<float>& act = last_act_;
 
     // Concatenate into obs
     const int obs_size = obs_cfg_.obs_size;
     std::vector<float> obs;
     obs.reserve(obs_size);
-
     obs.insert(obs.end(), cmd_scaled.begin(), cmd_scaled.end());
     obs.insert(obs.end(), gyr.begin(), gyr.end());
     obs.insert(obs.end(), grav.begin(), grav.end());
@@ -273,15 +272,15 @@ void SDK2RobotControl::setControlMode(ControlMode mode)
     }
 }
 
-int SDK2RobotControl::move(double vx, double vy, double wz)
+int SDK2RobotControl::move(float vx, float vy, float wz)
 {
     // 切换到高层
     setControlMode(ControlMode::HighLevel);
 
     // 更新上次速度命令以便观测
-    last_cmd_[0] = static_cast<float>(vx);
-    last_cmd_[1] = static_cast<float>(vy);
-    last_cmd_[2] = static_cast<float>(wz);
+    last_cmd_[0] = vx;
+    last_cmd_[1] = vy;
+    last_cmd_[2] = wz;
 
     std::cout << "[SDK2] Move cmd: vx=" << vx << " vy=" << vy << " wz=" << wz << std::endl;
     int ret = sport_client_->Move(vx, vy, wz);

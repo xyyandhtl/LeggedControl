@@ -31,6 +31,7 @@ public:
         float kd = 2.0f;
         std::size_t history_steps = 1;
         int obs_size = 45;
+        int act_size = 12;
         std::array<float, 12> dft_dof_pos{};
         std::array<int, 12> joint_idx_sdk2policy{};
         std::array<int, 12> joint_idx_policy2sdk{};
@@ -52,8 +53,8 @@ public:
     virtual ~BaseRobotControl() = default;
 
     virtual void resetJointPosition() = 0;
-    virtual void applyPositionControl(const std::array<double, 12>& joint_positions) = 0;
-    virtual void applyVelCmdControl(double vx, double vy, double wz) = 0;
+    virtual void applyPositionControl(std::vector<float>& joint_positions) = 0;
+    virtual void applyVelCmdControl(float vx, float vy, float wz) = 0;
     virtual const RobotObsResult getRobotObs() = 0;
 
     void controlLoop();
@@ -70,7 +71,7 @@ protected:
     std::string config_path_;
     PolicyConfig obs_cfg_;
     std::vector<float> his_obs_;
-    std::array<float, 12> last_act_{};
+    std::vector<float> last_act_; // Changed from std::array<float, 12> to std::vector<float>
     std::array<float, 3> last_cmd_{0.0f, 0.0f, 0.0f};
 
     std::unique_ptr<Ort::Env> ort_env_;

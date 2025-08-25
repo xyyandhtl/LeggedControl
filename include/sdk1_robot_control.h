@@ -15,8 +15,8 @@ public:
     // Low-level position control interface (auto-switch to LowLevel)
     // void controlLoop() override;
     void resetJointPosition() override;
-    void applyPositionControl(const std::array<double, 12> &joint_positions) override;
-    void applyVelCmdControl(double vx, double vy, double wz) override;
+    void applyPositionControl(std::vector<float>& joint_positions) override;
+    void applyVelCmdControl(float vx, float vy, float wz) override;
     const RobotObsResult getRobotObs() override;
 
     void udpRecv();
