@@ -75,13 +75,15 @@ void BaseRobotControl::controlLoop()
     std::vector<float> outputs;
 
     if (runOnnxInference(obs, outputs)) {
+        for (int i = 0; i < 12; ++i) {
+            last_act_[i] = outputs[i];
+        }
         // 打印 1x12 输出
         static uint64_t policy_cnt = 0;
         if ((++policy_cnt % 50) == 0) {
             std::cout << "ONNX infer out: ";
             for (int i = 0; i < 12; ++i) {
                 std::cout << outputs[i] << ", ";
-                last_act_[i] = outputs[i];
             }
             std::cout << std::endl;
         }
