@@ -5,17 +5,27 @@
 // 通用：把 ProviderOptions 映射到 C API 所需的 keys/values 并附加 EP
 namespace {
 inline void AppendEP(Ort::SessionOptions& so, const char* provider_name, const onnxruntime::ProviderOptions& opts) {
-    std::vector<const char*> keys; keys.reserve(opts.size());
-    std::vector<const char*> vals; vals.reserve(opts.size());
-    for (const auto& kv : opts) { keys.push_back(kv.first.c_str()); vals.push_back(kv.second.c_str()); }
-#if ORT_API_VERSION >= 17
-    Ort::ThrowOnError(Ort::GetApi().SessionOptionsAppendExecutionProvider(so, provider_name,
-                                                                          keys.data(), vals.data(), keys.size()));
-#else
-    // 兼容旧 API 名称
-    Ort::ThrowOnError(Ort::GetApi().SessionOptionsAppendExecutionProvider_V2(so, provider_name,
-                                                                             keys.data(), vals.data(), keys.size()));
-#endif
+    if (std::string(provider_name) == "CUDAExecutionProvider") {
+        OrtCUDAProviderOptions cuda_opts{};
+        for (const auto& kv : opts) {
+            if (kv.first == "device_id") {
+                cuda_opts.device_id = std::stoi(kv.second);
+            }
+            // Add other CUDA-specific options here if needed
+        }
+        Ort::ThrowOnError(Ort::GetApi().SessionOptionsAppendExecutionProvider_CUDA(so, &cuda_opts));
+    } else if (std::string(provider_name) == "TensorrtExecutionProvider") {
+        OrtTensorRTProviderOptions trt_opts{};
+        for (const auto& kv : opts) {
+            if (kv.first == "device_id") {
+                trt_opts.device_id = std::stoi(kv.second);
+            }
+            // Add other TensorRT-specific options here if needed
+        }
+        Ort::ThrowOnError(Ort::GetApi().SessionOptionsAppendExecutionProvider_TensorRT(so, &trt_opts));
+    } else {
+        std::cerr << "[AppendEP] Unsupported provider: " << provider_name << std::endl;
+    }
 }
 } // namespace
 

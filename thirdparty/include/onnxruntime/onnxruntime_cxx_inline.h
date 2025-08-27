@@ -8,15 +8,6 @@
 // the main C++ file with implementation details.
 
 #include <cstring>
-#include <functional>
-
-#define RETURN_ON_API_FAIL(expression) \
-  {                                    \
-    auto err = (expression);           \
-    if (err) {                         \
-      return Status(err);              \
-    }                                  \
-  }
 
 namespace Ort {
 
@@ -657,12 +648,6 @@ inline SessionOptionsImpl<T>& SessionOptionsImpl<T>::SetGraphOptimizationLevel(G
 }
 
 template <typename T>
-inline SessionOptionsImpl<T>& SessionOptionsImpl<T>::SetDeterministicCompute(bool value) {
-  ThrowOnError(GetApi().SetDeterministicCompute(this->p_, value));
-  return *this;
-}
-
-template <typename T>
 inline SessionOptionsImpl<T>& SessionOptionsImpl<T>::SetOptimizedModelFilePath(const ORTCHAR_T* optimized_model_filepath) {
   ThrowOnError(GetApi().SetOptimizedModelFilePath(this->p_, optimized_model_filepath));
   return *this;
@@ -862,26 +847,6 @@ inline SessionOptionsImpl<T>& SessionOptionsImpl<T>::SetCustomJoinThreadFn(OrtCu
 template <typename T>
 inline SessionOptionsImpl<T>& SessionOptionsImpl<T>::AppendExecutionProvider_OpenVINO(const OrtOpenVINOProviderOptions& provider_options) {
   ThrowOnError(GetApi().SessionOptionsAppendExecutionProvider_OpenVINO(this->p_, &provider_options));
-  return *this;
-}
-
-template <typename T>
-inline SessionOptionsImpl<T>& SessionOptionsImpl<T>::AppendExecutionProvider_OpenVINO_V2(const std::unordered_map<std::string, std::string>& provider_options) {
-  auto num_entries = provider_options.size();
-  std::vector<const char*> keys, values;
-  if (num_entries > 0) {
-    keys.reserve(num_entries);
-    values.reserve(num_entries);
-
-    for (const auto& entry : provider_options) {
-      keys.push_back(entry.first.c_str());
-      values.push_back(entry.second.c_str());
-    }
-  }
-
-  ThrowOnError(GetApi().SessionOptionsAppendExecutionProvider_OpenVINO_V2(this->p_,
-                                                                          keys.data(), values.data(), num_entries));
-
   return *this;
 }
 
@@ -1678,10 +1643,6 @@ inline Logger KernelContext::GetLogger() const {
   return Logger{out};
 }
 
-inline void KernelContext::ParallelFor(void (*fn)(void*, size_t), size_t total, size_t num_batch, void* usr_data) const {
-  ThrowOnError(GetApi().KernelContext_ParallelFor(ctx_, fn, total, num_batch, usr_data));
-}
-
 inline OpAttr::OpAttr(const char* name, const void* data, int len, OrtOpAttrType type) {
   Ort::ThrowOnError(GetApi().CreateOpAttr(name, data, len, type, &p_));
 }
@@ -1920,156 +1881,6 @@ void CustomOpBase<TOp, TKernel, WithStatus>::GetSessionConfigs(std::unordered_ma
     config_entry_key.append(key);
     out[key] = options.GetConfigEntryOrDefault(config_entry_key.c_str(), "");
   }
-}
-
-inline ShapeInferContext::ShapeInferContext(const OrtApi* ort_api,
-                                            OrtShapeInferContext* ctx) : ort_api_(ort_api), ctx_(ctx) {
-  size_t input_count = 0;
-  Ort::ThrowOnError(ort_api_->ShapeInferContext_GetInputCount(ctx_, &input_count));
-  for (size_t ith_input = 0; ith_input < input_count; ++ith_input) {
-    OrtTensorTypeAndShapeInfo* info{};
-    Ort::ThrowOnError(ort_api_->ShapeInferContext_GetInputTypeShape(ctx, ith_input, &info));
-    TensorTypeAndShapeInfo type_shape_info(info);
-    auto integer_shape = type_shape_info.GetShape();
-    std::vector<const char*> symbolic_shape(integer_shape.size(), {});
-    type_shape_info.GetSymbolicDimensions(&symbolic_shape[0], integer_shape.size());
-    Shape shape;
-    for (size_t ith = 0; ith < integer_shape.size(); ++ith) {
-      if (symbolic_shape[ith] && std::string{symbolic_shape[ith]}.size() > 0) {
-        shape.emplace_back(symbolic_shape[ith]);
-      } else {
-        shape.emplace_back(integer_shape[ith]);
-      }
-    }
-    input_shapes_.push_back(std::move(shape));
-    type_shape_info.release();
-  }
-}
-
-inline Status ShapeInferContext::SetOutputShape(size_t indice, const Shape& shape) {
-  OrtTensorTypeAndShapeInfo* info = {};
-  RETURN_ON_API_FAIL(ort_api_->CreateTensorTypeAndShapeInfo(&info));
-
-  using InfoPtr = std::unique_ptr<OrtTensorTypeAndShapeInfo, std::function<void(OrtTensorTypeAndShapeInfo*)>>;
-
-  InfoPtr info_ptr(info, [this](OrtTensorTypeAndShapeInfo* obj) {
-    ort_api_->ReleaseTensorTypeAndShapeInfo(obj);
-  });
-
-  std::vector<int64_t> integer_dims;
-  std::vector<const char*> symbolic_dims;
-
-  for (const auto dim : shape) {
-    if (dim.IsInt()) {
-      integer_dims.push_back(dim.IsInt());
-      symbolic_dims.push_back("");
-    } else {
-      if (!dim.AsSym() || std::string{dim.AsSym()}.empty()) {
-        ORT_CXX_API_THROW("Symbolic dim must not be an empty string", ORT_INVALID_ARGUMENT);
-      }
-      integer_dims.push_back(SymbolicInteger::INVALID_INT_DIM);
-      symbolic_dims.push_back(dim.AsSym());
-    }
-  }
-
-  RETURN_ON_API_FAIL(ort_api_->SetDimensions(info, integer_dims.data(), integer_dims.size()));
-  RETURN_ON_API_FAIL(ort_api_->SetSymbolicDimensions(info, symbolic_dims.data(), symbolic_dims.size()));
-  RETURN_ON_API_FAIL(ort_api_->ShapeInferContext_SetOutputTypeShape(ctx_, indice, info));
-  return Status{nullptr};
-}
-
-inline int64_t ShapeInferContext::GetAttrInt(const char* attr_name) {
-  const auto* attr = GetAttrHdl(attr_name);
-  int64_t i = {};
-  size_t out = {};
-  Ort::ThrowOnError(ort_api_->ReadOpAttr(attr, ORT_OP_ATTR_INT, &i, sizeof(i), &out));
-  return i;
-}
-
-inline ShapeInferContext::Ints ShapeInferContext::GetAttrInts(const char* attr_name) {
-  const auto* attr = GetAttrHdl(attr_name);
-  int64_t i = {};
-  size_t out = {};
-  // first call to get the bytes needed
-  auto status = ort_api_->ReadOpAttr(attr, ORT_OP_ATTR_INTS, &i, sizeof(i), &out);
-  if (status) {
-    size_t num_i = out / sizeof(int64_t);
-    ShapeInferContext::Ints ints(num_i, 0);
-    Ort::ThrowOnError(ort_api_->ReadOpAttr(attr, ORT_OP_ATTR_INTS, ints.data(), out, &out));
-    return ints;
-  } else {
-    return {i};
-  }
-}
-
-inline float ShapeInferContext::GetAttrFloat(const char* attr_name) {
-  const auto* attr = GetAttrHdl(attr_name);
-  float f = {};
-  size_t out = {};
-  Ort::ThrowOnError(ort_api_->ReadOpAttr(attr, ORT_OP_ATTR_FLOAT, &f, sizeof(f), &out));
-  return f;
-}
-
-inline ShapeInferContext::Floats ShapeInferContext::GetAttrFloats(const char* attr_name) {
-  const auto* attr = GetAttrHdl(attr_name);
-  float f = {};
-  size_t out = {};
-  // first call to get the bytes needed
-  auto status = ort_api_->ReadOpAttr(attr, ORT_OP_ATTR_FLOATS, &f, sizeof(f), &out);
-  if (status) {
-    size_t num_f = out / sizeof(float);
-    ShapeInferContext::Floats floats(num_f, 0);
-    Ort::ThrowOnError(ort_api_->ReadOpAttr(attr, ORT_OP_ATTR_FLOATS, floats.data(), out, &out));
-    return floats;
-  } else {
-    return {f};
-  }
-}
-
-inline std::string ShapeInferContext::GetAttrString(const char* attr_name) {
-  const auto* attr = GetAttrHdl(attr_name);
-  char c = {};
-  size_t out = {};
-  // first call to get the bytes needed
-  auto status = ort_api_->ReadOpAttr(attr, ORT_OP_ATTR_STRING, &c, sizeof(char), &out);
-  if (status) {
-    std::vector<char> chars(out, '\0');
-    Ort::ThrowOnError(ort_api_->ReadOpAttr(attr, ORT_OP_ATTR_STRING, chars.data(), out, &out));
-    return {chars.data()};
-  } else {
-    return {c};
-  }
-}
-
-inline ShapeInferContext::Strings ShapeInferContext::GetAttrStrings(const char* attr_name) {
-  const auto* attr = GetAttrHdl(attr_name);
-  char c = {};
-  size_t out = {};
-  // first call to get the bytes needed
-  auto status = ort_api_->ReadOpAttr(attr, ORT_OP_ATTR_STRINGS, &c, sizeof(char), &out);
-  if (status) {
-    std::vector<char> chars(out, '\0');
-    Ort::ThrowOnError(ort_api_->ReadOpAttr(attr, ORT_OP_ATTR_STRINGS, chars.data(), out, &out));
-    ShapeInferContext::Strings strings;
-    char* char_st = chars.data();
-    char* char_ed = char_st + out;
-    while (char_st < char_ed) {
-      strings.emplace_back(char_st);
-      while (*char_st != '\0') {
-        char_st++;
-      }
-      char_st++;
-    }
-    return strings;
-  } else {
-    return {std::string{c}};
-  }
-}
-
-inline const OrtOpAttr* ShapeInferContext::GetAttrHdl(const char* attr_name) const {
-  const OrtOpAttr* attr_hdl = {};
-  Ort::ThrowOnError(ort_api_->ShapeInferContext_GetAttribute(ctx_, attr_name, &attr_hdl));
-  return attr_hdl;
 }
 
 }  // namespace Ort
