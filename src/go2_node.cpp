@@ -10,10 +10,10 @@
 namespace legged_control
 {
 
-class VelocityNode : public rclcpp::Node
+class SDK2ControlNode : public rclcpp::Node
 {
 public:
-    VelocityNode()
+    SDK2ControlNode()
     : rclcpp::Node("velocity_node"),
       last_cmd_time_(this->now()),
       last_vx_(0.0), last_vy_(0.0), last_wz_(0.0),
@@ -36,15 +36,21 @@ public:
         // Subscribe to cmd_pos
         cmd_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
             "/cmd_vel", rclcpp::QoS(10),
-            std::bind(&VelocityNode::onTwist, this, std::placeholders::_1));
+            std::bind(&SDK2ControlNode::onTwist, this, std::placeholders::_1));
 
         // Control timer
             using namespace std::chrono_literals;
         auto period = std::chrono::microseconds(static_cast<int64_t>(1'000'000 / std::max(1, control_rate_hz)));
         control_timer_ = this->create_wall_timer(
-            period, std::bind(&VelocityNode::controlLoop, this));
+            period, std::bind(&SDK2ControlNode::controlLoop, this));
 
-        RCLCPP_INFO(get_logger(), "VelocityNode started. rate=%dHz, stale_timeout=%.2fs", control_rate_hz, stale_timeout_s_);
+        RCLCPP_INFO(get_logger(), "SDK2ControlNode started. rate=%dHz, stale_timeout=%.2fs", control_rate_hz, stale_timeout_s_);
+    }
+
+    ~SDK2ControlNode() override 
+    {
+        RCLCPP_INFO(this->get_logger(), "Node shutting down, cleanup here");
+        robot_control_->resetJointPosition();
     }
 
 private:
@@ -113,7 +119,7 @@ private:
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<legged_control::VelocityNode>();
+    auto node = std::make_shared<legged_control::SDK2ControlNode>();
     rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;
