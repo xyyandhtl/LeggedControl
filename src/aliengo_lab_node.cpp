@@ -50,6 +50,12 @@ public:
         RCLCPP_INFO(get_logger(), "VelocityNode started. rate=%dHz, stale_timeout=%.2fs", control_rate_hz, stale_timeout_s_);
     }
 
+    ~SDK1ControlNode() override
+    {
+        RCLCPP_INFO(this->get_logger(), "Node shutting down, cleanup here");
+        robot_control_->resetJointPosition();
+    }
+
 private:
     static float clamp(float value, float min_val, float max_val)
     {
