@@ -12,13 +12,6 @@ option(BUILD_EXAMPLES "Build example programs" ON)
 option(ENABLE_ORT_CUDA "Enable ONNX Runtime CUDA Execution Provider" OFF)
 option(ENABLE_ORT_TENSORRT "Enable ONNX Runtime TensorRT Execution Provider" OFF)
 
-# ROS2依赖
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(sensor_msgs REQUIRED)
-
 # SDK路径
 set(UNITREE_SDK_PATH ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty)
 
@@ -88,39 +81,29 @@ if(BUILD_EXAMPLES)
   add_subdirectory(example/aliengo)
 endif()
 
-# 直接构建 node，并把实现源码编进可执行文件
+# 头文件目录
 include_directories(include)
+
+# Include standalone CMakeLists
+add_subdirectory(src/standalone)
+
+# ROS2依赖 (如果不构建 ROS2 node，注释掉下面所有内容)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+
+# 构建 ROS2 node
 add_executable(aliengo_node
   src/aliengo_node.cpp
   src/base_robot_control.cpp
   src/sdk1_robot_control.cpp
-)
-add_executable(aliengo_lab_node
-  src/aliengo_lab_node.cpp
-  src/base_robot_control.cpp
-  src/sdk1_robot_control.cpp
+  src/sdk1_robot_control_him.cpp
   src/sdk1_robot_control_lab.cpp
 )
 add_executable(go2_node
   src/go2_node.cpp
-  src/base_robot_control.cpp
-  src/sdk2_robot_control.cpp
-)
-
-# 非 ROS2 独立运行的可执行文件
-add_executable(aliengo_standalone
-  src/standalone/aliengo.cpp
-  src/base_robot_control.cpp
-  src/sdk1_robot_control.cpp
-)
-add_executable(aliengo_lab_standalone
-  src/standalone/aliengo_lab.cpp
-  src/base_robot_control.cpp
-  src/sdk1_robot_control.cpp
-  src/sdk1_robot_control_lab.cpp
-)
-add_executable(go2_standalone
-  src/standalone/go2w.cpp
   src/base_robot_control.cpp
   src/sdk2_robot_control.cpp
 )
@@ -142,37 +125,21 @@ ament_target_dependencies(go2_node
 # 为包含 EP 代码的目标定义编译宏（用于 #ifdef ORT_WITH_*）
 if(ENABLE_ORT_CUDA)
   target_compile_definitions(aliengo_node PRIVATE ORT_WITH_CUDA)
-  target_compile_definitions(aliengo_lab_node PRIVATE ORT_WITH_CUDA)
-  target_compile_definitions(aliengo_standalone PRIVATE ORT_WITH_CUDA)
-  target_compile_definitions(aliengo_lab_standalone PRIVATE ORT_WITH_CUDA)
   target_compile_definitions(go2_node    PRIVATE ORT_WITH_CUDA)
-  target_compile_definitions(go2_standalone    PRIVATE ORT_WITH_CUDA)
 endif()
 if(ENABLE_ORT_TENSORRT)
   target_compile_definitions(aliengo_node PRIVATE ORT_WITH_TENSORRT)
-  target_compile_definitions(aliengo_lab_node PRIVATE ORT_WITH_TENSORRT)
-  target_compile_definitions(aliengo_standalone PRIVATE ORT_WITH_TENSORRT)
-  target_compile_definitions(aliengo_lab_standalone PRIVATE ORT_WITH_TENSORRT)
   target_compile_definitions(go2_node    PRIVATE ORT_WITH_TENSORRT)
-  target_compile_definitions(go2_standalone    PRIVATE ORT_WITH_TENSORRT)
 endif()
 
 # 直接从可执行目标进行链接
 target_link_libraries(aliengo_node unitree_sdk1)
-target_link_libraries(aliengo_lab_node unitree_sdk1)
-target_link_libraries(aliengo_standalone unitree_sdk1)
-target_link_libraries(aliengo_lab_standalone unitree_sdk1)
 target_link_libraries(go2_node    unitree_sdk2)
-target_link_libraries(go2_standalone    unitree_sdk2)
 
 # 运行时库搜索路径
 if(UNIX AND NOT APPLE)
   target_link_options(aliengo_node PRIVATE -Wl,-rpath,${UNITREE_LIB_PATH})
-  target_link_options(aliengo_lab_node PRIVATE -Wl,-rpath,${UNITREE_LIB_PATH})
-  target_link_options(aliengo_standalone PRIVATE -Wl,-rpath,${UNITREE_LIB_PATH})
-  target_link_options(aliengo_lab_standalone PRIVATE -Wl,-rpath,${UNITREE_LIB_PATH})
   target_link_options(go2_node PRIVATE -Wl,-rpath,${UNITREE_LIB_PATH})
-  target_link_options(go2_standalone PRIVATE -Wl,-rpath,${UNITREE_LIB_PATH})
 endif()
 
 # 安装目标

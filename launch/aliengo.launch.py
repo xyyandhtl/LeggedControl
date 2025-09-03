@@ -6,7 +6,8 @@ from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     package_path = get_package_share_directory('legged_control')
-    config_file_path = PathJoinSubstitution([package_path, 'config', 'sdk1_config.ini'])
+    config_file_path = PathJoinSubstitution([package_path, 'config', 'sdk1_config_him.ini'])
+    # config_file_path = PathJoinSubstitution([package_path, 'config', 'sdk1_config_lab.ini'])
 
     target_ip_arg = DeclareLaunchArgument(
         'target_ip', default_value='192.168.123.10',
@@ -20,6 +21,10 @@ def generate_launch_description():
         'local_port', default_value='8082',
         description='Local port for UDP communication')
     
+    policy_arg = DeclareLaunchArgument(
+        'policy', default_value='him',
+        description='Policy to use for control (lab or him)')
+
     control_rate_arg = DeclareLaunchArgument(
         'control_rate_hz', default_value='15',
         description='Control loop rate in Hz (50Hz for policy control)')
@@ -41,6 +46,7 @@ def generate_launch_description():
             'target_ip': LaunchConfiguration('target_ip'),
             'target_port': LaunchConfiguration('target_port'),
             'local_port': LaunchConfiguration('local_port'),
+            'policy': LaunchConfiguration('policy'),
             'control_rate_hz': LaunchConfiguration('control_rate_hz'),
             'stale_timeout_s': LaunchConfiguration('stale_timeout_s'),
             'max_vx': LaunchConfiguration('max_vx'),
@@ -54,6 +60,7 @@ def generate_launch_description():
         target_ip_arg,
         target_port_arg,
         local_port_arg,
+        policy_arg,
         control_rate_arg,
         stale_timeout_arg,
         max_vx_arg,

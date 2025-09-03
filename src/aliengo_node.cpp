@@ -4,7 +4,8 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/twist.hpp>
-#include "sdk1_robot_control.h" // Include the robot control logic
+#include "sdk1_robot_control_him.h"
+#include "sdk1_robot_control_lab.h"
 
 class SDK1ControlNode : public rclcpp::Node
 {
@@ -30,8 +31,12 @@ public:
         max_wz_ = this->declare_parameter<float>("max_wz", 1.0);
         stale_timeout_s_ = stale_timeout_s;
 
+        std::string policy_ = this->declare_parameter<std::string>("policy", "him"); // "lab" or "him"
         std::string config_path = this->declare_parameter<std::string>("config_path", "");
-        robot_control_ = std::make_unique<SDK1RobotControl>(local_port, target_ip, tanget_port, config_path);
+        if (policy_ == "lab")
+            robot_control_ = std::make_unique<SDK1RobotControlLab>(local_port, target_ip, tanget_port, config_path);
+        else
+            robot_control_ = std::make_unique<SDK1RobotControlHIM>(local_port, target_ip, tanget_port, config_path);
 
         // Calculate dt based on control rate
         dt_ = 1.0 / control_rate_hz;

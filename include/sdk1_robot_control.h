@@ -17,7 +17,6 @@ public:
     void resetJointPosition() override;
     void applyPositionControl(std::vector<float>& joint_positions) override;
     void applyVelCmdControl(float vx, float vy, float wz) override;
-    virtual const RobotObsResult getRobotObs() override;
 
     void udpRecv();
     void udpSend();
