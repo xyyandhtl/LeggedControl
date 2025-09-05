@@ -5,7 +5,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/twist.hpp>
-#include "sdk2_robot_control_go2.h"
+#include "sdk2_robot_control_go2w.h"
 
 namespace legged_control
 {
@@ -31,7 +31,7 @@ public:
         stale_timeout_s_ = this->declare_parameter<float>("stale_timeout_s", 0.5);
 
         std::string config_path = this->declare_parameter<std::string>("config_path", "");
-        robot_control_ = std::make_unique<SDK2RobotControlGo2>(network_interface, timeout_s, auto_stand, config_path);
+        robot_control_ = std::make_unique<SDK2RobotControlGo2W>(network_interface, timeout_s, auto_stand, config_path);
 
         // Subscribe to cmd_pos
         cmd_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -97,7 +97,7 @@ private:
     }
 
 private:
-    std::unique_ptr<SDK2RobotControlGo2> robot_control_;
+    std::unique_ptr<SDK2RobotControlGo2W> robot_control_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_sub_;
     rclcpp::TimerBase::SharedPtr control_timer_;
 

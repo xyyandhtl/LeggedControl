@@ -36,7 +36,7 @@ public:
 
     void initJoystick(const std::string &network_interface);
 
-private:
+protected:
     // Topics
     static constexpr const char* TOPIC_LOWSTATE = "rt/lowstate";
     static constexpr const char* TOPIC_LOWCMD   = "rt/lowcmd";

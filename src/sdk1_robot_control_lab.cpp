@@ -53,8 +53,9 @@ const BaseRobotControl::RobotObsResult SDK1RobotControlLab::getRobotObs()
     const std::vector<float>& act = last_act_;
 
     // 构建观测帧
+    const int obs_size = obs_cfg_.obs_size;
     std::vector<float> obs;
-    obs.reserve(obs_cfg_.obs_size);
+    obs.reserve(obs_size);
     obs.insert(obs.end(), gyr.begin(), gyr.end());
     obs.insert(obs.end(), grav.begin(), grav.end());
     obs.insert(obs.end(), cmd_scaled.begin(), cmd_scaled.end());
@@ -67,8 +68,8 @@ const BaseRobotControl::RobotObsResult SDK1RobotControlLab::getRobotObs()
         v = clip(v, -obs_cfg_.obs_clip, obs_cfg_.obs_clip);
     }
 
-    // Update history buffer
-    const std::size_t frame = static_cast<std::size_t>(obs_cfg_.obs_size);
+    // Update history buffer: shift right by one frame, put latest at front
+    const std::size_t frame = static_cast<std::size_t>(obs_size);
     const std::size_t total = frame * obs_cfg_.history_steps;
     if (his_obs_.size() != total) {
         ensureObsBuffers();

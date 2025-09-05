@@ -106,6 +106,13 @@ add_executable(go2_node
   src/go2_node.cpp
   src/base_robot_control.cpp
   src/sdk2_robot_control.cpp
+  src/sdk2_robot_control_go2.cpp
+)
+add_executable(go2w_node
+  src/go2w_node.cpp
+  src/base_robot_control.cpp
+  src/sdk2_robot_control.cpp
+  src/sdk2_robot_control_go2w.cpp
 )
 
 # ament依赖
@@ -121,31 +128,42 @@ ament_target_dependencies(go2_node
   std_msgs
   sensor_msgs
 )
+ament_target_dependencies(go2w_node
+  rclcpp
+  geometry_msgs
+  std_msgs
+  sensor_msgs
+)
 
 # 为包含 EP 代码的目标定义编译宏（用于 #ifdef ORT_WITH_*）
 if(ENABLE_ORT_CUDA)
   target_compile_definitions(aliengo_node PRIVATE ORT_WITH_CUDA)
-  target_compile_definitions(go2_node    PRIVATE ORT_WITH_CUDA)
+  target_compile_definitions(go2_node     PRIVATE ORT_WITH_CUDA)
+  target_compile_definitions(go2w_node    PRIVATE ORT_WITH_CUDA)
 endif()
 if(ENABLE_ORT_TENSORRT)
   target_compile_definitions(aliengo_node PRIVATE ORT_WITH_TENSORRT)
-  target_compile_definitions(go2_node    PRIVATE ORT_WITH_TENSORRT)
+  target_compile_definitions(go2_node     PRIVATE ORT_WITH_TENSORRT)
+  target_compile_definitions(go2w_node    PRIVATE ORT_WITH_TENSORRT)
 endif()
 
 # 直接从可执行目标进行链接
 target_link_libraries(aliengo_node unitree_sdk1)
-target_link_libraries(go2_node    unitree_sdk2)
+target_link_libraries(go2_node     unitree_sdk2)
+target_link_libraries(go2w_node    unitree_sdk2)
 
 # 运行时库搜索路径
 if(UNIX AND NOT APPLE)
   target_link_options(aliengo_node PRIVATE -Wl,-rpath,${UNITREE_LIB_PATH})
-  target_link_options(go2_node PRIVATE -Wl,-rpath,${UNITREE_LIB_PATH})
+  target_link_options(go2_node     PRIVATE -Wl,-rpath,${UNITREE_LIB_PATH})
+  target_link_options(go2w_node    PRIVATE -Wl,-rpath,${UNITREE_LIB_PATH})
 endif()
 
 # 安装目标
 install(TARGETS
   aliengo_node
   go2_node
+  go2w_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

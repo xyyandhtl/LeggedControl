@@ -166,18 +166,17 @@ const BaseRobotControl::RobotObsResult SDK2RobotControl::getRobotObs()
         std::lock_guard<std::mutex> lk(low_state_mtx_);
         state_copy = low_state_;
     }
-    
-    // 1) cmd (3)
+
+    // 1) cmd (3) scaled
     std::array<float, 3> cmd_scaled = last_cmd_;
     cmd_scaled[0] *= obs_cfg_.vel_scale;
     cmd_scaled[1] *= obs_cfg_.vel_scale;
     cmd_scaled[2] *= obs_cfg_.gyr_scale;
 
-    // 2) IMU gyr (3) scaled and clipped
+     // 2) IMU gyr (3) scaled and clipped
     std::array<float, 3> gyr{0, 0, 0};
     for (int i = 0; i < 3; ++i) {
-        float g = state_copy.imu_state().gyroscope()[i];
-        gyr[i] = g * obs_cfg_.gyr_scale;
+        gyr[i] = state_copy.imu_state().gyroscope()[i] * obs_cfg_.gyr_scale;
     }
 
     // 3) grav (3) from quaternion (w,x,y,z)
@@ -190,25 +189,17 @@ const BaseRobotControl::RobotObsResult SDK2RobotControl::getRobotObs()
     }
     std::array<float, 3> grav = gravFromQuatWxyz(q);
 
-    // 4) dof pos/vel (obs_cfg_.act_size) todo: 12 -> 16
-    std::vector<float> dof_pos_sdk(obs_cfg_.act_size);
-    std::vector<float> dof_vel_sdk(obs_cfg_.act_size);
+    // 4) dof pos/vel (obs_cfg_.act_size, 12/16) in sdk order
+    std::vector<float> dof_pos_sdk(obs_cfg_.act_size), dof_vel_sdk(obs_cfg_.act_size);
     const auto& ms = state_copy.motor_state();
-    // const int n = std::min<int>(obs_cfg_.act_size, ms.size());
     for (int i = 0; i < obs_cfg_.act_size; ++i) {
-        dof_pos_sdk[i] = ms[i].q();
+        dof_pos_sdk[i] = ms[i].q() - obs_cfg_.dft_dof_pos[i];
         dof_vel_sdk[i] = ms[i].dq();
     }
-    // Subtract default offsets
-    for (int i = 0; i < obs_cfg_.act_size; ++i) {
-        dof_pos_sdk[i] -= obs_cfg_.dft_dof_pos[i];
-    }
-    // Reorder robot->policy using joint_idx_sdk2policy
-    std::vector<float> dof_pos(obs_cfg_.act_size);
-    std::vector<float> dof_vel(obs_cfg_.act_size);
+    // in policy order (by using joint_idx_sdk2policy)
+    std::vector<float> dof_pos(obs_cfg_.act_size), dof_vel(obs_cfg_.act_size);
     for (int pi = 0; pi < obs_cfg_.act_size; ++pi) {
         const int ri = obs_cfg_.joint_idx_sdk2policy[pi];
-        // const int ri_clamped = std::clamp(ri, 0, 11);
         dof_pos[pi] = dof_pos_sdk[ri] * obs_cfg_.dof_pos_scale;
         dof_vel[pi] = dof_vel_sdk[ri] * obs_cfg_.dof_vel_scale;
     }
@@ -217,12 +208,12 @@ const BaseRobotControl::RobotObsResult SDK2RobotControl::getRobotObs()
     const std::vector<float>& act = last_act_;
 
     // Concatenate into obs
-    const int obs_size = obs_cfg_.obs_size;
+    const int obs_size = obs_cfg_.obs_size;  // 12/16
     std::vector<float> obs;
     obs.reserve(obs_size);
-    obs.insert(obs.end(), cmd_scaled.begin(), cmd_scaled.end());
     obs.insert(obs.end(), gyr.begin(), gyr.end());
     obs.insert(obs.end(), grav.begin(), grav.end());
+    obs.insert(obs.end(), cmd_scaled.begin(), cmd_scaled.end());
     obs.insert(obs.end(), dof_pos.begin(), dof_pos.end());
     obs.insert(obs.end(), dof_vel.begin(), dof_vel.end());
     obs.insert(obs.end(), act.begin(), act.end());
@@ -248,6 +239,7 @@ const BaseRobotControl::RobotObsResult SDK2RobotControl::getRobotObs()
 
     static uint64_t obs_cnt = 0;
     if ((++obs_cnt % 50) == 0) {
+        std::cout << "[SDK2_LAB] Current robot obs: ";
         std::copy(obs.begin(), obs.end(), std::ostream_iterator<float>(std::cout, " "));
         std::cout << std::endl;
     }
