@@ -239,7 +239,7 @@ const BaseRobotControl::RobotObsResult SDK2RobotControl::getRobotObs()
 
     static uint64_t obs_cnt = 0;
     if ((++obs_cnt % 50) == 0) {
-        std::cout << "[SDK2_LAB] Current robot obs: ";
+        std::cout << "[SDK2] Current robot obs: ";
         std::copy(obs.begin(), obs.end(), std::ostream_iterator<float>(std::cout, " "));
         std::cout << std::endl;
     }

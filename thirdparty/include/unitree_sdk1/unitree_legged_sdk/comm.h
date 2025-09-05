@@ -102,11 +102,11 @@ namespace UNITREE_LEGGED_SDK
 		uint32_t SN;
 		uint8_t bandWidth;
 		// MotorCmd motorCmd[20];
-		std::array<MotorCmd, 20> motorCmd;
+		std::array<MotorCmd, 20> motorCmd;  // 电机控制命令（包含：工作模式、位置、速度、力矩、刚度、阻尼）
 		// LED led[4];
 		std::array<LED, 4> led;
 		// uint8_t wirelessRemote[40];
-		std::array<uint8_t, 40> wirelessRemote;
+		std::array<uint8_t, 40> wirelessRemote;  // 手柄输入数据
 		uint32_t reserve;
 		uint32_t crc;
 	} LowCmd;                              // low level control
