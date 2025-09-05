@@ -118,8 +118,8 @@ void BaseRobotControl::controlLoop()
         static uint64_t policy_cnt = 0;
         if ((++policy_cnt % 50) == 0) {
             std::cout << "ONNX infer out (" << act_size << " actions): ";
-            for (const auto& action : outputs) {
-                std::cout << action << ", ";
+            for (int i = 0; i < act_size; ++i) {
+                std::cout << outputs[i] * obs_cfg_.act_scale + obs_cfg_.dft_dof_pos[i] << ", ";
             }
             std::cout << std::endl;
         }
