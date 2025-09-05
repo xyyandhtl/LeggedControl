@@ -32,9 +32,9 @@ public:
         std::size_t history_steps = 1;
         int obs_size = 45;
         int act_size = 12;
-        std::array<float, 12> dft_dof_pos{};
-        std::array<int, 12> joint_idx_sdk2policy{};
-        std::array<int, 12> joint_idx_policy2sdk{};
+        std::vector<float> dft_dof_pos{};
+        std::vector<int> joint_idx_sdk2policy{};
+        std::vector<int> joint_idx_policy2sdk{};
 
         static PolicyConfig FromFile(const std::string& path, bool* ok = nullptr);
     };

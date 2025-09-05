@@ -39,6 +39,20 @@ BaseRobotControl::PolicyConfig BaseRobotControl::PolicyConfig::FromFile(const st
         return cfg;
     }
     std::string line;
+
+    auto parse_vec = [](const std::string& s, auto& vec) {
+        using T = typename std::decay_t<decltype(vec)>::value_type;
+        std::stringstream ss(s);
+        std::string item;
+        vec.clear();
+        while (std::getline(ss, item, ',')) {
+            std::stringstream converter(trim(item));
+            T value;
+            converter >> value;
+            vec.push_back(value);
+        }
+    };
+
     while (std::getline(fin, line)) {
         auto p = line.find_first_of("#;");
         if (p != std::string::npos) line = line.substr(0, p);
@@ -65,10 +79,21 @@ BaseRobotControl::PolicyConfig BaseRobotControl::PolicyConfig::FromFile(const st
         else if (key == "act_size") cfg.act_size = std::stoi(val);
         else if (key == "kp") cfg.kp = std::stof(val);
         else if (key == "kd") cfg.kd = std::stof(val);
-        else if (key == "dft_dof_pos") parse_list<float, 12>(val, cfg.dft_dof_pos);
-        else if (key == "joint_idx_sdk2policy") parse_list<int, 12>(val, cfg.joint_idx_sdk2policy);
+        else if (key == "dft_dof_pos") parse_vec(val, cfg.dft_dof_pos);
+        else if (key == "joint_idx_sdk2policy") parse_vec(val, cfg.joint_idx_sdk2policy);
     }
+
+    if (cfg.dft_dof_pos.size() != static_cast<size_t>(cfg.act_size) ||
+        cfg.joint_idx_sdk2policy.size() != static_cast<size_t>(cfg.act_size)) {
+        std::cerr << "[BaseRobotControl] Config Error: act_size (" << cfg.act_size 
+                  << ") does not match size of dft_dof_pos (" << cfg.dft_dof_pos.size() 
+                  << ") or joint_idx_sdk2policy (" << cfg.joint_idx_sdk2policy.size() << ")!" << std::endl;
+        if (ok) *ok = false;
+        return cfg;
+    }
+
     compute_pol2rob_from_sdk2policy(cfg.joint_idx_sdk2policy, cfg.joint_idx_policy2sdk);
+
     if (ok) *ok = true;
     return cfg;
 }
@@ -84,22 +109,23 @@ void BaseRobotControl::controlLoop()
     std::vector<float> obs(res.his_obs.begin(), res.his_obs.begin() + total);
     std::vector<float> outputs;
 
+    const int act_size = obs_cfg_.act_size;
     if (runOnnxInference(obs, outputs)) {
-        for (int i = 0; i < 12; ++i) {
+        for (int i = 0; i < act_size; ++i) {
             last_act_[i] = outputs[i];
         }
-        // 打印 1x12 输出
+        // 打印动作
         static uint64_t policy_cnt = 0;
         if ((++policy_cnt % 50) == 0) {
-            std::cout << "ONNX infer out: ";
-            for (int i = 0; i < 12; ++i) {
-                std::cout << outputs[i] << ", ";
+            std::cout << "ONNX infer out (" << act_size << " actions): ";
+            for (const auto& action : outputs) {
+                std::cout << action << ", ";
             }
             std::cout << std::endl;
         }
         // 将策略顺序的动作映射到机器人关节顺序
-        std::vector<float> joint_positions(obs_cfg_.act_size);
-        for (std::size_t r = 0; r < obs_cfg_.act_size; ++r) {
+        std::vector<float> joint_positions(act_size);
+        for (std::size_t r = 0; r < act_size; ++r) {
             int p = obs_cfg_.joint_idx_policy2sdk[r];
             joint_positions[r] = outputs[p] * obs_cfg_.act_scale + obs_cfg_.dft_dof_pos[r];
         }
@@ -110,7 +136,9 @@ void BaseRobotControl::controlLoop()
 void BaseRobotControl::setObsConfig(const PolicyConfig& cfg) 
 {
     obs_cfg_ = cfg;
+
     compute_pol2rob_from_sdk2policy(obs_cfg_.joint_idx_sdk2policy, obs_cfg_.joint_idx_policy2sdk);
+
     ensureObsBuffers();
 }
 

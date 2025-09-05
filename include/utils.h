@@ -2,6 +2,7 @@
 #define ROBOTCONTROL_COMMON_UTILS_H
 
 #include <array>
+#include <vector>
 #include <string>
 #include <sstream>
 #include <iostream>
@@ -51,5 +52,23 @@ inline void compute_pol2rob_from_sdk2policy(const std::array<int, N>& sdk2policy
         }
     }
 }
+
+// Overload for std::vector
+inline void compute_pol2rob_from_sdk2policy(const std::vector<int>& sdk2policy,
+                                         std::vector<int>& pol2rob) {
+    const size_t n = sdk2policy.size();
+    pol2rob.resize(n);
+    for (size_t i = 0; i < n; ++i) pol2rob[i] = static_cast<int>(i);
+    for (size_t pi = 0; pi < n; ++pi) {
+        int ri = sdk2policy[pi];
+        if (ri >= 0 && ri < static_cast<int>(n)) {
+            pol2rob[ri] = static_cast<int>(pi);
+        } else {
+            std::cerr << "[SDK-UTILS] joint index out of range in joint_idx_sdk2policy at pi="
+                      << pi << " val=" << ri << " (keeping identity)\n";
+        }
+    }
+}
+
 
 #endif // ROBOTCONTROL_COMMON_UTILS_H
