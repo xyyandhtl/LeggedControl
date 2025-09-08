@@ -14,6 +14,7 @@ public:
 
     void processVelCmd(float vx, float vy, float wz);
     void shutdown();
+    void setStandalone(bool standalone);
 
 private:
     enum class ControlState { SPORT_MODE, POLICY_MODE };

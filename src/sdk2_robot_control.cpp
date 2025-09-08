@@ -45,6 +45,10 @@ void SDK2RobotControl::shutdown() {
     policy_controller_->resetJointPosition();
 }
 
+void SDK2RobotControl::setStandalone(bool standalone) {
+    policy_controller_->setStandalone(standalone);
+}
+
 void SDK2RobotControl::onJoystickMessage(const void* msg) {
     auto key_data = *reinterpret_cast<const unitree_go::msg::dds_::WirelessController_*>(msg);
     gamepad_.Update(key_data);
@@ -59,7 +63,7 @@ void SDK2RobotControl::onJoystickMessage(const void* msg) {
         // Launch resetJointPosition in a detached thread to avoid blocking the DDS callback thread
         std::thread([this]() {
             policy_controller_->resetJointPosition();
-            std::cout << "[SDK2RobotControl] Joint reset complete." << std::endl;
+            std::cout << "[SDK2 | RobotControl] Joint reset complete." << std::endl;
         }).detach();
     }
 

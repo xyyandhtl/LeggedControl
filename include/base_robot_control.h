@@ -65,7 +65,10 @@ public:
     // Onnx inference
     bool runOnnxInference(const std::vector<float>& input, std::vector<float>& output);
     // If non-ros, set standalone mode
-    void setStandalone(bool standalone) { standalone_ = standalone; }
+    void setStandalone(bool standalone) {
+        standalone_ = standalone;
+        std::cout << "[BaseRobotControl] standalone_ set to: " << (standalone_ ? "True" : "False") << std::endl;
+    }
 
 protected:
     std::string config_path_;
