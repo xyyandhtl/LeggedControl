@@ -56,14 +56,11 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, float t
     joystick_sub_.reset(new unitree::robot::ChannelSubscriber<unitree_go::msg::dds_::WirelessController_>(TOPIC_JOYSTICK));
     joystick_sub_->InitChannel([this](const void *msg) {
         key_data_ = *reinterpret_cast<const unitree_go::msg::dds_::WirelessController_ *>(msg);
-        joystick_lx_ = joystick_lx_ * (1 - joystick_smooth_) + 
-                       (std::fabs(key_data_.lx()) < joystick_dead_zone_ ? 0.0f : key_data_.lx()) * joystick_smooth_;
-        joystick_ly_ = joystick_ly_ * (1 - joystick_smooth_) + 
-                       (std::fabs(key_data_.ly()) < joystick_dead_zone_ ? 0.0f : key_data_.ly()) * joystick_smooth_;
-        joystick_rx_ = joystick_rx_ * (1 - joystick_smooth_) + 
-                       (std::fabs(key_data_.rx()) < joystick_dead_zone_ ? 0.0f : key_data_.rx()) * joystick_smooth_;
-        joystick_ry_ = joystick_ry_ * (1 - joystick_smooth_) + 
-                       (std::fabs(key_data_.ry()) < joystick_dead_zone_ ? 0.0f : key_data_.ry()) * joystick_smooth_;
+        gamepad_.Update(key_data_);
+        joystick_lx_ = gamepad_.lx;
+        joystick_ly_ = gamepad_.ly;
+        joystick_rx_ = gamepad_.rx;
+        joystick_ry_ = gamepad_.ry;
     }, 1);
     std::cout << "[SDK2] Joystick initialized with smooth=" << joystick_smooth_ 
               << " and dead_zone=" << joystick_dead_zone_ << std::endl;

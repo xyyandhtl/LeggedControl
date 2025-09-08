@@ -1,0 +1,2 @@
+add_executable(joystick_emu joystick_emu.cpp)
+target_link_libraries(joystick_emu unitree_sdk2)

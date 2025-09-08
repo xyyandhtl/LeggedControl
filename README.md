@@ -22,6 +22,16 @@ ros2 launch legged_control aliengo.launch.py target_ip:=192.168.123.10
 ros2 launch legged_control go2w.launch.py network_interface:=eth0 auto_stand:=true
 ```
 
+- Test with Virtual Controller (L1 for reset, L2 for start/stop policy)
+```bash
+# Terminal 1
+ros2 launch legged_control go2w.launch.py network_interface:=eth0 auto_stand:=true
+```
+```bash
+# Terminal 2
+./build/legged_control/tools/joystick_emu eth0
+```
+
 ### Standalone run without ros:
 check [standalone_entry](src/standalone)
 ```shell

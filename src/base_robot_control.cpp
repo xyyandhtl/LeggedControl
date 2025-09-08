@@ -100,6 +100,24 @@ BaseRobotControl::PolicyConfig BaseRobotControl::PolicyConfig::FromFile(const st
 
 void BaseRobotControl::controlLoop()
 {
+    // Check for joystick commands to reset or toggle policy
+    if (gamepad_.L1.on_press) {
+        resetJointPosition();
+        policy_running_ = false; // Stop policy on reset
+        std::cout << "[USER] L1 pressed, reset robot position." << std::endl;
+        gamepad_.L1.on_press = false;
+    }
+    if (gamepad_.L2.on_press) {
+        policy_running_ = !policy_running_;
+        std::cout << "[USER] L2 pressed, policy is now " << (policy_running_ ? "RUNNING" : "STOPPED") << std::endl;
+        gamepad_.L2.on_press = false;
+    }
+
+    // Exit if policy is not running
+    if (!policy_running_) {
+        return;
+    }
+
     RobotObsResult res = getRobotObs();
 
     const int frame = obs_cfg_.obs_size;

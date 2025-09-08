@@ -74,6 +74,9 @@ protected:
     std::vector<float> last_act_; // Changed from std::array<float, 12> to std::vector<float>
     std::array<float, 3> last_cmd_{0.0f, 0.0f, 0.0f};
 
+    unitree::common::Gamepad gamepad_;
+    std::atomic<bool> policy_running_{false};
+
     std::unique_ptr<Ort::Env> ort_env_;
     std::unique_ptr<Ort::Session> ort_session_;
     std::vector<const char*> ort_input_names_;
