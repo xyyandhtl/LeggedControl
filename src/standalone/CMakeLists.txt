@@ -15,13 +15,15 @@ add_executable(go2_standalone
   go2.cpp
   ../base_robot_control.cpp
   ../sdk2_robot_control.cpp
-  ../sdk2_robot_control_go2.cpp
+  ../sdk2_sport_controller.cpp
+  ../sdk2_policy_controller.cpp
 )
 add_executable(go2w_standalone
   go2w.cpp
   ../base_robot_control.cpp
   ../sdk2_robot_control.cpp
-  ../sdk2_robot_control_go2w.cpp
+  ../sdk2_sport_controller.cpp
+  ../sdk2_policy_controller.cpp
 )
 
 # Link libraries

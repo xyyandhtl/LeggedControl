@@ -5,23 +5,20 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/twist.hpp>
-#include "sdk2_robot_control_go2.h"
+#include "sdk2_robot_control.h"
 
 namespace legged_control
 {
 
-class SDK2ControlNode : public rclcpp::Node
-{
+class SDK2ControlNode : public rclcpp::Node {
 public:
     SDK2ControlNode()
-    : rclcpp::Node("velocity_node"),
+    : rclcpp::Node("go2_node"),
       last_cmd_time_(this->now()),
       last_vx_(0.0), last_vy_(0.0), last_wz_(0.0),
-      sent_stop_(false), high_level_(false)
-    {
+      sent_stop_(false) {
         // Parameters
         std::string network_interface = this->declare_parameter<std::string>("network_interface", "eth0");
-        float timeout_s = this->declare_parameter<float>("timeout_s", 20.0);
         int control_rate_hz = this->declare_parameter<int>("control_rate_hz", 50);
         bool auto_stand = this->declare_parameter<bool>("auto_stand", true);
 
@@ -31,93 +28,70 @@ public:
         stale_timeout_s_ = this->declare_parameter<float>("stale_timeout_s", 0.5);
 
         std::string config_path = this->declare_parameter<std::string>("config_path", "");
-        robot_control_ = std::make_unique<SDK2RobotControlGo2>(network_interface, timeout_s, auto_stand, config_path);
+        // Instantiate the main controller directly
+        robot_control_ = std::make_unique<SDK2RobotControl>(network_interface, auto_stand, config_path);
 
-        // Subscribe to cmd_pos
+        // Subscribe to velocity commands
         cmd_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
             "/cmd_vel", rclcpp::QoS(10),
             std::bind(&SDK2ControlNode::onTwist, this, std::placeholders::_1));
 
         // Control timer
-            using namespace std::chrono_literals;
+        using namespace std::chrono_literals;
         auto period = std::chrono::microseconds(static_cast<int64_t>(1'000'000 / std::max(1, control_rate_hz)));
         control_timer_ = this->create_wall_timer(
             period, std::bind(&SDK2ControlNode::controlLoop, this));
 
-        RCLCPP_INFO(get_logger(), "SDK2ControlNode started. rate=%dHz, stale_timeout=%.2fs", control_rate_hz, stale_timeout_s_);
+        RCLCPP_INFO(get_logger(), "Go2/W Control Node started. rate=%dHz, stale_timeout=%.2fs", control_rate_hz, stale_timeout_s_);
     }
 
-    ~SDK2ControlNode() override 
-    {
-        RCLCPP_INFO(this->get_logger(), "Node shutting down, cleanup here");
-        robot_control_->resetJointPosition();
-    }
-
-private:
-    static float clamp(float value, float min_val, float max_val)
-    {
-        return std::max(min_val, std::min(max_val, value));
-    }
-
-    void onTwist(const geometry_msgs::msg::Twist::SharedPtr msg)
-    {
-        last_vx_ = clamp(msg->linear.x, -max_vx_, max_vx_);
-        last_vy_ = clamp(msg->linear.y, -max_vy_, max_vy_);
-        last_wz_ = clamp(msg->angular.z, -max_wz_, max_wz_);
-        last_cmd_time_ = this->now();
-        sent_stop_ = false;
-    }
-
-    void controlLoop()
-    {
-        const auto now = this->now();
-        const float dt = (now - last_cmd_time_).seconds();
-
-        if (dt <= stale_timeout_s_) {
-            // Continue sending Move commands to maintain motion
-            if (high_level_) {
-                int rc = robot_control_->move(last_vx_, last_vy_, last_wz_);
-                if (rc < 0) {
-                    RCLCPP_WARN(get_logger(), "Move failed rc=%d", rc);
-                }
-            } else {
-                RCLCPP_INFO(get_logger(), "Applying velocity command: vx=%.2f, vy=%.2f, wz=%.2f", last_vx_, last_vy_, last_wz_);
-                robot_control_->applyVelCmdControl(last_vx_, last_vy_, last_wz_);
-            }
-        } else {
-            // Command expired, send StopMove once
-            if (!sent_stop_) {
-                int rc = robot_control_->stopMove();
-                RCLCPP_INFO(get_logger(), "StopMove rc=%d (cmd stale for %.2fs)", rc, dt);
-                sent_stop_ = true;
-                last_vx_ = last_vy_ = last_wz_ = 0.0;
-                // robot_control_->applyVelCmdControl(last_vx_, last_vy_, last_wz_);
-            }
+    ~SDK2ControlNode() override {
+        RCLCPP_INFO(this->get_logger(), "Go2/W Control Node shutting down. Performing cleanup.");
+        if (robot_control_) {
+            robot_control_->shutdown();
         }
     }
 
 private:
-    std::unique_ptr<SDK2RobotControlGo2> robot_control_;
+    void onTwist(const geometry_msgs::msg::Twist::SharedPtr msg) {
+        // ROS2 messages use double, so we cast to float for our internal variables.
+        last_vx_ = std::max(-max_vx_, std::min(static_cast<float>(msg->linear.x), max_vx_));
+        last_vy_ = std::max(-max_vy_, std::min(static_cast<float>(msg->linear.y), max_vy_));
+        last_wz_ = std::max(-max_wz_, std::min(static_cast<float>(msg->angular.z), max_wz_));
+        last_cmd_time_ = this->now();
+        sent_stop_ = false;
+    }
+
+    void controlLoop() {
+        const auto now = this->now();
+        const float dt = (now - last_cmd_time_).seconds();
+
+        if (dt <= stale_timeout_s_) {
+            // If commands are fresh, send them to the robot controller
+            robot_control_->processVelCmd(last_vx_, last_vy_, last_wz_);
+        } else {
+            // If commands are stale, send a stop command once
+            if (!sent_stop_) {
+                robot_control_->processVelCmd(0.0f, 0.0f, 0.0f);
+                sent_stop_ = true;
+            }
+        }
+    }
+
+    std::unique_ptr<SDK2RobotControl> robot_control_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_sub_;
     rclcpp::TimerBase::SharedPtr control_timer_;
 
     rclcpp::Time last_cmd_time_;
-    float last_vx_;
-    float last_vy_;
-    float last_wz_;
+    float last_vx_, last_vy_, last_wz_;
     bool sent_stop_;
-    bool high_level_;
-
-    float max_vx_;
-    float max_vy_;
-    float max_wz_;
     float stale_timeout_s_;
+    float max_vx_, max_vy_, max_wz_;
 };
 
 }  // namespace legged_control
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<legged_control::SDK2ControlNode>();
     rclcpp::spin(node);

@@ -34,8 +34,8 @@ def generate_launch_description():
 
     node = Node(
         package='legged_control',
-        executable='go2w_node',
-        name='go2w_node',
+        executable='go2_node',
+        name='go2_node',
         output='screen',
         parameters=[{
             'network_interface': LaunchConfiguration('network_interface'),

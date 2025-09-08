@@ -1,88 +1,36 @@
 #ifndef SDK2_ROBOT_CONTROL_HPP
 #define SDK2_ROBOT_CONTROL_HPP
 
-#include "base_robot_control.h"
-
-#include <unitree/robot/channel/channel_factory.hpp>
-#include <unitree/robot/channel/channel_publisher.hpp>
+#include "sdk2_sport_controller.h"
+#include "sdk2_policy_controller.h"
 #include <unitree/robot/channel/channel_subscriber.hpp>
-#include <unitree/idl/go2/LowState_.hpp>
-#include <unitree/idl/go2/LowCmd_.hpp>
 #include "unitree/idl/go2/WirelessController_.hpp"
-#include <unitree/robot/channel/channel_subscriber.hpp>
-#include <unitree/robot/go2/sport/sport_client.hpp>
-#include <unitree/robot/b2/motion_switcher/motion_switcher_client.hpp>
+#include "utils.h"
 
-class SDK2RobotControl : public BaseRobotControl {
+class SDK2RobotControl {
 public:
-    enum class ControlMode { HighLevel = 0, LowLevel = 1 };
-
-    SDK2RobotControl(const std::string &network_interface, float timeout_s, bool auto_stand, const std::string& config_path);
+    SDK2RobotControl(const std::string &network_interface, bool auto_stand, const std::string& config_path);
     ~SDK2RobotControl();
 
-    // Low-level position control interface (auto-switch to LowLevel)
-    // void controlLoop() override;
-    void resetJointPosition() override;
-    void applyPositionControl(std::vector<float>& joint_positions) override;
-    void applyVelCmdControl(float vx, float vy, float wz) override;
-    const RobotObsResult getRobotObs() override;
+    void processVelCmd(float vx, float vy, float wz);
+    void shutdown();
 
-    // High-level velocity control interface (auto-switch to HighLevel)
-    int move(float vx, float vy, float wz);
-    int stopMove();
-    // Explicitly switch control mode
-    void setControlMode(ControlMode mode);
-    ControlMode controlMode() const { return mode_; }
+private:
+    enum class ControlState { SPORT_MODE, POLICY_MODE };
 
-    void initJoystick(const std::string &network_interface);
-
-protected:
-    // Topics
-    static constexpr const char* TOPIC_LOWSTATE = "rt/lowstate";
-    static constexpr const char* TOPIC_LOWCMD   = "rt/lowcmd";
     static constexpr const char* TOPIC_JOYSTICK = "rt/wirelesscontroller";
 
-    // Low-level channels
-    unitree::robot::ChannelPublisherPtr<unitree_go::msg::dds_::LowCmd_> lowcmd_pub_;
-    unitree::robot::ChannelSubscriberPtr<unitree_go::msg::dds_::LowState_> lowstate_sub_;
+    void onJoystickMessage(const void* msg);
+    void switchToPolicyMode();
+    void switchToSportMode();
+
+    std::unique_ptr<SDK2SportController> sport_controller_;
+    std::unique_ptr<SDK2PolicyController> policy_controller_;
     unitree::robot::ChannelSubscriberPtr<unitree_go::msg::dds_::WirelessController_> joystick_sub_;
 
-    // Low-level messages
-    unitree_go::msg::dds_::LowCmd_ low_cmd_{};
-    unitree_go::msg::dds_::LowState_ low_state_{};
-    unitree_go::msg::dds_::WirelessController_ key_data_;
-    // std::mutex joystick_mtx_;
-
-    // High-level client
-    std::unique_ptr<unitree::robot::go2::SportClient> sport_client_;
-    // Low-level control loop thread
-    unitree::common::ThreadPtr controlLoopThreadPtr_;
-
-    // Motion switcher (release mode when entering LowLevel)
-    std::unique_ptr<unitree::robot::b2::MotionSwitcherClient> msc_;
-
-    // std::array<float, 3> last_cmd_{0.0f, 0.0f, 0.0f};
-    // std::array<float, 12> last_act_{};
-
-    // Control mode and low-level loop
-    ControlMode mode_ = ControlMode::HighLevel;
-    std::thread lowcmd_loop_;
-    std::atomic<bool> lowcmd_loop_running_{false};
-
-    float joystick_smooth_ = 0.03f;
-    float joystick_dead_zone_ = 0.01f;
-    float joystick_lx_ = 0.0f;
-    float joystick_ly_ = 0.0f;
-    float joystick_rx_ = 0.0f;
-    float joystick_ry_ = 0.0f;
-
-    void onLowStateMessage(const void* msg);
-
-    int queryMotionStatus();
-    void releaseMotionModeIfNeeded();
-
-    void initLowCmd();
-    static uint32_t crc32_core(uint32_t* ptr, uint32_t len);
+    ControlState current_state_ = ControlState::SPORT_MODE;
+    unitree::common::Gamepad gamepad_;
+    std::array<float, 3> last_vel_cmd_{0.0f, 0.0f, 0.0f};
 };
 
 #endif // SDK2_ROBOT_CONTROL_HPP
