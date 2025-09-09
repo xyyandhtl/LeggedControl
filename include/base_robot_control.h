@@ -32,9 +32,9 @@ public:
         std::size_t history_steps = 1;
         int obs_size = 45;
         int act_size = 12;
-        std::array<float, 12> dft_dof_pos{};
-        std::array<int, 12> joint_idx_sdk2policy{};
-        std::array<int, 12> joint_idx_policy2sdk{};
+        std::vector<float> dft_dof_pos{};
+        std::vector<int> joint_idx_sdk2policy{};
+        std::vector<int> joint_idx_policy2sdk{};
 
         static PolicyConfig FromFile(const std::string& path, bool* ok = nullptr);
     };
@@ -65,7 +65,10 @@ public:
     // Onnx inference
     bool runOnnxInference(const std::vector<float>& input, std::vector<float>& output);
     // If non-ros, set standalone mode
-    void setStandalone(bool standalone) { standalone_ = standalone; }
+    void setStandalone(bool standalone) {
+        standalone_ = standalone;
+        std::cout << "[BaseRobotControl] standalone_ set to: " << (standalone_ ? "True" : "False") << std::endl;
+    }
 
 protected:
     std::string config_path_;
@@ -73,6 +76,9 @@ protected:
     std::vector<float> his_obs_;
     std::vector<float> last_act_; // Changed from std::array<float, 12> to std::vector<float>
     std::array<float, 3> last_cmd_{0.0f, 0.0f, 0.0f};
+
+    unitree::common::Gamepad gamepad_;
+    std::atomic<bool> policy_running_{false};
 
     std::unique_ptr<Ort::Env> ort_env_;
     std::unique_ptr<Ort::Session> ort_session_;

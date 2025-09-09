@@ -19,11 +19,12 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
               << " target_ip=" << target_ip
               << " target_port=" << target_port << std::endl;
 
-    udp_.InitCmdData(cmd_);
+    udp_.InitCmdData(cmd_);  // 初始化UDP通信
+    // 并进行第一次数据收发
     cmd_.levelFlag = LOWLEVEL;
     udp_.Recv();
-    udp_.GetRecv(state_);
-    udp_.SetSend(cmd_);
+    udp_.GetRecv(state_);  // 将解析后的状态存入 state_
+    udp_.SetSend(cmd_);  // 将 cmd_ 中的数据设置为发送数据
     udp_.Send();
 
     // Load config
@@ -41,7 +42,7 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
     std::string onnx_path = config_path.substr(0, config_path.find_last_of('/') + 1) + obs_cfg_.onnx_model_path;
     loadOnnxModel(onnx_path);
 
-    // loop_udpSend and loop_udpRecv can be merged to one thread
+    // loop_udpSend and loop_udpRecv can be merged to one thread，创建三个线程，分别用于：发送UDP数据、接收UDP数据 和 执行主控制循环
     loop_udpSend = std::make_unique<LoopFunc>(
         "udp_send", control_dt_, 3, boost::bind(&SDK1RobotControl::udpSend, this));
     loop_udpRecv = std::make_unique<LoopFunc>(
@@ -51,12 +52,14 @@ SDK1RobotControl::SDK1RobotControl(uint16_t local_port, const std::string &targe
     loop_udpSend->start();
     loop_udpRecv->start();
 
+    // 等待手柄按下 "up" 按钮，则复位机器狗的关节位置
     std::cout << "[SDK1] Waiting for joystick to reset and begin loop_control..." << std::endl;
     while (getJoystickData().btn.components.up != 1) {
         // std::cout << state_.motorState[1].q << std::endl;
         std::this_thread::sleep_for(std::chrono::duration<double>(control_dt_));
     }
     resetJointPosition();
+    // 等待手柄按下 "up" 按钮，则启动主控制循环
     while (getJoystickData().btn.components.up != 1) {
         std::this_thread::sleep_for(std::chrono::duration<double>(control_dt_));
     }
@@ -83,9 +86,9 @@ SDK1RobotControl::~SDK1RobotControl()
 void SDK1RobotControl::resetJointPosition()
 {
     // Parameters analogous to the Python logic
-    const float max_time = 5.0;       // seconds
+    const float max_time = 5.0;       // 重置时间阈值，seconds
     const float control_freq = 20.0;  // Hz
-    const float act_clip = 0.1;       // rad per step
+    const float act_clip = 0.1;       // 每步最大角度阈值，rad per step
 
     // 1) Read current joint positions (thread-safe)
     std::vector<float> joint_pos(obs_cfg_.act_size);
@@ -98,22 +101,24 @@ void SDK1RobotControl::resetJointPosition()
     std::cout << std::endl;
 
     // 2) Compute number of steps based on max delta and act_clip
-    float act_max = 0.0;
+    float act_max = 0.0;  // 所有关节中的 最大角度偏差
     for (int i = 0; i < obs_cfg_.act_size; ++i) {
         const float diff = std::abs(joint_pos[i] - dft_dof_pos[i]);
         if (diff > act_max) act_max = diff;
     }
-    const int num_steps = std::max(1, static_cast<int>(std::ceil(act_max / act_clip)));
+    const int num_steps = std::max(1, static_cast<int>(std::ceil(act_max / act_clip)));  // 所需调整的 步数
     const auto interval = std::chrono::duration<float>(1.0 / control_freq);
 
     // 3) Progressive reset with timeout check
     const auto start_time = std::chrono::steady_clock::now();
     for (int step = 0; step < num_steps; ++step) {
+        // 重置时间超时检测
         const auto now = std::chrono::steady_clock::now();
         if (std::chrono::duration<float>(now - start_time).count() > max_time) {
             std::cerr << "[SDK1] RESET FAILED: timeout after " << max_time << "s" << std::endl;
             break;
         }
+        // 插值计算 当前调整步 的各关节位置
         const float ratio = static_cast<float>(step + 1) / static_cast<float>(num_steps);
         std::vector<float> interp(obs_cfg_.act_size);
         for (int i = 0; i < obs_cfg_.act_size; ++i) {
@@ -132,6 +137,9 @@ void SDK1RobotControl::resetJointPosition()
     }
 }
 
+/**
+ * 位置控制：将 输入的关节位置 以及 配置文件中的 刚度、阻尼 赋值给 cmd_ 中的 电机控制命令
+ */
 void SDK1RobotControl::applyPositionControl(std::vector<float>& joint_positions)
 {
     for (std::size_t i = 0; i < obs_cfg_.act_size; i++) {
@@ -159,7 +167,7 @@ void SDK1RobotControl::udpRecv()
 {
     udp_.Recv();
     udp_.GetRecv(state_);
-    std::memcpy(&key_data_, &state_.wirelessRemote, sizeof(xRockerBtnDataStruct));
+    std::memcpy(&key_data_, &state_.wirelessRemote, sizeof(xRockerBtnDataStruct));  // 从 state_ 中获取 手柄数据 至 key_data_
 }
 
 void SDK1RobotControl::udpSend()
@@ -178,8 +186,8 @@ void SDK1RobotControl::udpSend()
     //     }
     //     std::cout << std::endl;
     // }
-    safe_.PowerProtect(cmd_, state_, 8);
-    // safe_.PositionProtect(cmd, state, 0.087);
+    safe_.PowerProtect(cmd_, state_, 8);  // 根据 要发送给机器狗的命令 及 机器狗的状态 判定 是否触发功率保护（关节电机限制功率的 80%）
+    // safe_.PositionProtect(cmd, state, 0.087);  // 是否触发位置突变保护（5度）
     udp_.SetSend(cmd_);
     udp_.Send();
 }

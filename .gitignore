@@ -1,5 +1,8 @@
 .vscode/
+.idea/
 
+install/
+log/
 build/
 
 libonnxruntime_providers_shared.so

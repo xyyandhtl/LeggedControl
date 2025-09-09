@@ -36,7 +36,7 @@ const BaseRobotControl::RobotObsResult SDK1RobotControlLab::getRobotObs()
     }
     // 从旋转四元数 计算的 重力方向 (base坐标系，3)
     std::array<float, 3> grav = gravFromQuatWxyz(state_copy.imu.quaternion);
-    // 当前 关节位置 (已减默认位置)、关节速度
+    // 当前 关节位置 (已减默认位置, rad)、关节速度 (rad/s)
     std::vector<float> dof_pos_sdk(obs_cfg_.act_size), dof_vel_sdk(obs_cfg_.act_size);
     for (int i = 0; i < obs_cfg_.act_size; ++i) {
         dof_pos_sdk[i] = state_copy.motorState[i].q - obs_cfg_.dft_dof_pos[i];
@@ -53,8 +53,9 @@ const BaseRobotControl::RobotObsResult SDK1RobotControlLab::getRobotObs()
     const std::vector<float>& act = last_act_;
 
     // 构建观测帧
+    const int obs_size = obs_cfg_.obs_size;
     std::vector<float> obs;
-    obs.reserve(obs_cfg_.obs_size);
+    obs.reserve(obs_size);
     obs.insert(obs.end(), gyr.begin(), gyr.end());
     obs.insert(obs.end(), grav.begin(), grav.end());
     obs.insert(obs.end(), cmd_scaled.begin(), cmd_scaled.end());
@@ -67,8 +68,8 @@ const BaseRobotControl::RobotObsResult SDK1RobotControlLab::getRobotObs()
         v = clip(v, -obs_cfg_.obs_clip, obs_cfg_.obs_clip);
     }
 
-    // Update history buffer
-    const std::size_t frame = static_cast<std::size_t>(obs_cfg_.obs_size);
+    // Update history buffer: shift right by one frame, put latest at front
+    const std::size_t frame = static_cast<std::size_t>(obs_size);
     const std::size_t total = frame * obs_cfg_.history_steps;
     if (his_obs_.size() != total) {
         ensureObsBuffers();
@@ -76,7 +77,7 @@ const BaseRobotControl::RobotObsResult SDK1RobotControlLab::getRobotObs()
     if (obs_cfg_.history_steps > 1) {
         std::memmove(his_obs_.data() + frame, his_obs_.data(), sizeof(float) * frame * (obs_cfg_.history_steps - 1));
     }
-    std::memcpy(his_obs_.data(), obs.data(), sizeof(float) * frame);
+    std::memcpy(his_obs_.data(), obs.data(), sizeof(float) * frame);  // 最新观测 复制到 历史观测buffer 的第0帧
 
     RobotObsResult res;
     res.his_obs = his_obs_;

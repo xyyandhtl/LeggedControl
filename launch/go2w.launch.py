@@ -6,7 +6,7 @@ from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     package_path = get_package_share_directory('legged_control')
-    config_file_path = PathJoinSubstitution([package_path, 'config', 'sdk2_config_go2.ini'])
+    config_file_path = PathJoinSubstitution([package_path, 'config', 'sdk2_config_go2w.ini'])
 
     network_interface_arg = DeclareLaunchArgument(
         'network_interface', default_value='eth0',

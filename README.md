@@ -22,12 +22,29 @@ ros2 launch legged_control aliengo.launch.py target_ip:=192.168.123.10
 ros2 launch legged_control go2w.launch.py network_interface:=eth0 auto_stand:=true
 ```
 
+- Test with Joystick Controller (Virtual)
+```bash
+# Terminal 1
+ros2 launch legged_control go2w.launch.py network_interface:=eth0 auto_stand:=true
+```
+```bash
+# Terminal 2
+./build/legged_control/tools/joystick_emu eth0
+```
+
 ### Standalone run without ros:
 check [standalone_entry](src/standalone)
 ```shell
 ./build/legged_control/aliengo_standalone
 ./build/legged_control/go2w_standalone
 ```
+1.  **L2 Button (Enter and Control Policy):**
+    * **Default State:** The system starts in High-Level Sport Mode (`SPORT_MODE`).
+    * **First L2 Press:** Switches from `SPORT_MODE` to Low-Level Policy Mode (`POLICY_MODE`). Upon switching, the policy is in a **paused** state, awaiting further commands.
+    * **Subsequent L2 Presses (in Policy Mode):** Toggles the policy between "Running" and "Paused" states.
+
+2.  **L1 Button (Safe Exit and Reset):**
+    * Pressing L1 at any time triggers a safety procedure: it **pauses** the policy, switches back to `SPORT_MODE`, and commands the robot to perform the **default pose**.
 
 ## Todo
 - SDK2 go2 lidar/camera data integration
