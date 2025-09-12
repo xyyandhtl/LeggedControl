@@ -68,11 +68,11 @@ private:
 
         if (dt <= stale_timeout_s_) {
             // If commands are fresh, send them to the robot controller
-            robot_control_->processVelCmd(last_vx_, last_vy_, last_wz_);
+            robot_control_->setVelCmd(last_vx_, last_vy_, last_wz_);
         } else {
             // If commands are stale, send a stop command once
             if (!sent_stop_) {
-                robot_control_->processVelCmd(0.0f, 0.0f, 0.0f);
+                robot_control_->setVelCmd(0.0f, 0.0f, 0.0f);
                 sent_stop_ = true;
             }
         }

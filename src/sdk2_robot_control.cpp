@@ -16,6 +16,9 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, bool au
     sport_controller_ = std::make_unique<SDK2SportController>(network_interface);
     policy_controller_ = std::make_unique<SDK2PolicyController>(config_path);
 
+    // Set initial ROS command time to avoid immediate timeout
+    last_ros_cmd_time_ = std::chrono::steady_clock::now();
+
     // Auto stand up if requested
     if (auto_stand) {
         sport_controller_->standUp();
@@ -34,7 +37,13 @@ SDK2RobotControl::SDK2RobotControl(const std::string &network_interface, bool au
 SDK2RobotControl::~SDK2RobotControl() {
     std::cout << "[SDK2 | RobotControl] Shutting down..." << std::endl;
     // Controllers are managed by unique_ptr and will be cleaned up automatically
-    // TODO: 是否要切换到 SPORT_MODE，然后运行 sport_client_->StopMove()
+}
+
+void SDK2RobotControl::setVelCmd(float vx, float vy, float wz) {
+    ros_vel_cmd_[0] = vx;
+    ros_vel_cmd_[1] = vy;
+    ros_vel_cmd_[2] = wz;
+    last_ros_cmd_time_ = std::chrono::steady_clock::now();
 }
 
 void SDK2RobotControl::shutdown() {
@@ -79,10 +88,34 @@ void SDK2RobotControl::onJoystickMessage(const void* msg) {
         }
     }
 
-    // Pass stick inputs to the policy controller for its observation vector
-    // This allows the policy to know the user's desired velocity
-    if (current_state_ == ControlState::POLICY_MODE) {
-        policy_controller_->applyVelCmdControl(gamepad_.ly, gamepad_.lx, gamepad_.rx);
+    // --- Command Arbitration Logic ---
+    float vx = 0.0f, vy = 0.0f, wz = 0.0f;
+    bool is_joystick_active = gamepad_.ly != 0.0f || gamepad_.lx != 0.0f || gamepad_.rx != 0.0f;
+
+    if (is_joystick_active) {
+        // Priority 1: Physical joystick is being used
+        vx = gamepad_.ly;
+        vy = gamepad_.lx;
+        wz = gamepad_.rx;
+    } else {
+        // Priority 2: ROS /cmd_vel is active (not timed out)
+        auto now = std::chrono::steady_clock::now();
+        if ((now - last_ros_cmd_time_) < ros_cmd_timeout_) {
+            vx = ros_vel_cmd_[0];
+            vy = ros_vel_cmd_[1];
+            wz = ros_vel_cmd_[2];
+        }
+        // Else: Both are inactive, velocity remains 0.0f
+    }
+
+    // --- Command Execution ---
+    switch (current_state_) {
+        case ControlState::SPORT_MODE:
+            sport_controller_->move(vx, vy, wz);
+            break;
+        case ControlState::POLICY_MODE:
+            policy_controller_->applyVelCmdControl(vx, vy, wz);
+            break;
     }
 }
 
@@ -116,16 +149,4 @@ void SDK2RobotControl::switchToSportMode() {
     // 2. Switch state. The robot is now idle, waiting for sport commands.
     current_state_ = ControlState::SPORT_MODE;
     std::cout << "[SDK2 | RobotControl] Switched to SPORT_MODE." << std::endl;
-}
-
-void SDK2RobotControl::processVelCmd(float vx, float vy, float wz) {
-    // This function is called periodically by the ROS2 node.
-    // It sends commands to the active controller.
-    if (current_state_ == ControlState::SPORT_MODE) {
-        sport_controller_->move(vx, vy, wz);
-    } else {
-        // In policy mode, velocity commands are handled by the joystick callback
-        // to be used as part of the policy's observation.
-        // We could also choose to blend them, but we keep it simple for now.
-    }
 }
