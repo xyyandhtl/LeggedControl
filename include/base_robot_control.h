@@ -60,7 +60,7 @@ public:
     void controlLoop();
 
     void setObsConfig(const PolicyConfig& cfg);
-    
+
     std::array<float, 3> gravFromQuatWxyz(const std::array<float, 4>& q);
     // Onnx inference
     bool runOnnxInference(const std::vector<float>& input, std::vector<float>& output);
