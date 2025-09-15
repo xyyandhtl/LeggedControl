@@ -86,7 +86,6 @@ include_directories(include)
 
 # Include standalone CMakeLists
 add_subdirectory(src/standalone)
-# add_subdirectory(tools)
 
 # ROS2依赖 (如果不构建 ROS2 node，注释掉下面所有内容)
 find_package(ament_cmake REQUIRED)
@@ -109,6 +108,9 @@ add_executable(go2_node
   src/sdk2_sport_control.cpp
   src/sdk2_policy_control.cpp
 )
+add_executable(joystick_simu_node
+  src/joystick_simu_node.cpp
+)
 
 # ament依赖
 ament_target_dependencies(aliengo_node
@@ -122,6 +124,10 @@ ament_target_dependencies(go2_node
   geometry_msgs
   std_msgs
   sensor_msgs
+)
+ament_target_dependencies(joystick_simu_node
+  rclcpp
+  geometry_msgs
 )
 
 # 为包含 EP 代码的目标定义编译宏（用于 #ifdef ORT_WITH_*）
@@ -137,6 +143,7 @@ endif()
 # 直接从可执行目标进行链接
 target_link_libraries(aliengo_node unitree_sdk1)
 target_link_libraries(go2_node     unitree_sdk2)
+target_link_libraries(joystick_simu_node unitree_sdk2)
 
 # 运行时库搜索路径
 if(UNIX AND NOT APPLE)
@@ -148,6 +155,7 @@ endif()
 install(TARGETS
   aliengo_node
   go2_node
+  joystick_simu_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
