@@ -21,6 +21,7 @@ ros2 launch legged_control aliengo.launch.py target_ip:=192.168.123.10
 ```bash
 ros2 launch legged_control go2w.launch.py network_interface:=eth0 auto_stand:=true
 ```
+add `control_mode:=policy` to take Policy Mode.
 
 - Test with Joystick Controller (Virtual)
 ```bash

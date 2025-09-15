@@ -106,9 +106,8 @@ add_executable(aliengo_node
 add_executable(go2_node
   src/go2_node.cpp
   src/base_robot_control.cpp
-  src/sdk2_robot_control.cpp
-  src/sdk2_sport_controller.cpp
-  src/sdk2_policy_controller.cpp
+  src/sdk2_sport_control.cpp
+  src/sdk2_policy_control.cpp
 )
 
 # ament依赖
