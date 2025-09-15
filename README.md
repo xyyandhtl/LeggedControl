@@ -18,15 +18,19 @@ colcon build --packages-select legged_control --cmake-clean-cache --symlink-inst
 ros2 launch legged_control aliengo.launch.py target_ip:=192.168.123.10
 ```
 - SDK2（Go2/Go2W）
+```text
+if build on ros2 foxy, need to Compile cyclone-dds and set envs as [unitree_ros2](https://github.com/unitreerobotics/unitree_ros2/tree/master?tab=readme-ov-file#1-network-configuration)
+```
 ```bash
-ros2 launch legged_control go2w.launch.py network_interface:=eth0 auto_stand:=true
+# this node should not set RMW_IMPLEMENTATION/CYCLONEDDS_URI, otherwise would not successfully run (don't know why)
+ros2 launch legged_control go2w.launch.py network_interface:=enx0826ae330a17
 ```
 add `control_mode:=policy` to take Policy Mode.
 
 - Test with Joystick Controller (Virtual)
 ```bash
 # Terminal 1
-ros2 launch legged_control go2w.launch.py network_interface:=eth0 auto_stand:=true
+ros2 launch legged_control go2w.launch.py network_interface:=eth0 auto
 ```
 ```bash
 # Terminal 2
@@ -53,5 +57,3 @@ check [standalone_entry](src/standalone)
 ./build/legged_control/tools/joystick_emu
 ```
 
-## Todo
-- SDK2 go2 lidar/camera data integration

@@ -1,5 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
@@ -9,7 +9,7 @@ def generate_launch_description():
 
     # Declare launch arguments
     network_interface_arg = DeclareLaunchArgument(
-        'network_interface', default_value='eth0',
+        'network_interface', default_value='enx0826ae330a17',
         description='Network interface for Unitree DDS')
 
     control_mode_arg = DeclareLaunchArgument(
@@ -40,11 +40,13 @@ def generate_launch_description():
             {'max_wz': 1.5},
 
             # Sport mode specific (will be ignored by policy controller)
-            {'auto_stand': True},
+            {'auto_stand': False},
         ]
     )
 
     return LaunchDescription([
+        SetEnvironmentVariable(name='RMW_IMPLEMENTATION', value=''),
+        SetEnvironmentVariable(name='CYCLONEDDS_URI', value=''),
         network_interface_arg,
         control_mode_arg,
         config_name_arg,

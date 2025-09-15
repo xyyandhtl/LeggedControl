@@ -113,9 +113,9 @@ void SDK2SportControl::controlLoop() {
     }
 
     if (is_joystick_active || !sent_stop_) {
-        RCLCPP_INFO(get_logger(), "Executing Move(vx: %.2f, vy: %.2f, wz: %.2f)", vx, vy, wz);
+        RCLCPP_DEBUG(get_logger(), "Executing Move(vx: %.2f, vy: %.2f, wz: %.2f)", vx, vy, wz);
         int ret = sport_client_->Move(vx, vy, wz);
-        RCLCPP_INFO(get_logger(), "\tMove ret: %d", ret);
+        RCLCPP_DEBUG(get_logger(), "\tMove ret: %d", ret);
     }
 
     // Print current state periodically
@@ -124,7 +124,7 @@ void SDK2SportControl::controlLoop() {
         std::lock_guard<std::mutex> lock(sport_state_mutex_);
         state_copy = current_sport_state_;
     }
-    RCLCPP_INFO(get_logger(),
+    RCLCPP_DEBUG(get_logger(),
         "State: mode=%d, vx=%.3f, vy=%.3f, yaw_speed=%.3f",
         state_copy.mode(),
         state_copy.velocity()[0],

@@ -86,7 +86,7 @@ include_directories(include)
 
 # Include standalone CMakeLists
 add_subdirectory(src/standalone)
-add_subdirectory(tools)
+# add_subdirectory(tools)
 
 # ROS2依赖 (如果不构建 ROS2 node，注释掉下面所有内容)
 find_package(ament_cmake REQUIRED)
