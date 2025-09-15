@@ -48,6 +48,11 @@ SDK2SportControl::SDK2SportControl(const rclcpp::NodeOptions & options)
     joystick_sub_->InitChannel(std::bind(&SDK2SportControl::onJoystickMessage, this, std::placeholders::_1), 1);
     RCLCPP_INFO(get_logger(), "Joystick subscriber initialized.");
 
+    // Initialize SportState subscriber
+    sport_state_sub_.reset(new unitree::robot::ChannelSubscriber<unitree_go::msg::dds_::SportModeState_>("rt/sportstate"));
+    sport_state_sub_->InitChannel(std::bind(&SDK2SportControl::onSportStateMessage, this, std::placeholders::_1), 1);
+    RCLCPP_INFO(get_logger(), "SportState subscriber initialized.");
+
     // Initialize control loop timer
     using namespace std::chrono_literals;
     auto period = std::chrono::microseconds(static_cast<int64_t>(1'000'000 / std::max(1, control_rate_hz)));
@@ -74,6 +79,12 @@ void SDK2SportControl::onTwist(const geometry_msgs::msg::Twist::SharedPtr msg) {
 void SDK2SportControl::onJoystickMessage(const void *msg) {
     auto key_data = *reinterpret_cast<const unitree_go::msg::dds_::WirelessController_ *>(msg);
     gamepad_.Update(key_data);
+
+    if (gamepad_.L2.on_press) {
+        gamepad_.L2.on_press = false; // Consume event
+        RCLCPP_INFO(get_logger(), "L2 Pressed, calling BalanceStand() to enter dynamic standing mode.");
+        sport_client_->BalanceStand();
+    }
 }
 
 void SDK2SportControl::controlLoop() {
@@ -102,6 +113,26 @@ void SDK2SportControl::controlLoop() {
     }
 
     if (is_joystick_active || !sent_stop_) {
-        sport_client_->Move(vx, vy, wz);
+        RCLCPP_INFO(get_logger(), "Executing Move(vx: %.2f, vy: %.2f, wz: %.2f)", vx, vy, wz);
+        int ret = sport_client_->Move(vx, vy, wz);
+        RCLCPP_INFO(get_logger(), "\tMove ret: %d", ret);
     }
+
+    // Print current state periodically
+    unitree_go::msg::dds_::SportModeState_ state_copy;
+    {
+        std::lock_guard<std::mutex> lock(sport_state_mutex_);
+        state_copy = current_sport_state_;
+    }
+    RCLCPP_INFO(get_logger(),
+        "State: mode=%d, vx=%.3f, vy=%.3f, yaw_speed=%.3f",
+        state_copy.mode(),
+        state_copy.velocity()[0],
+        state_copy.velocity()[1],
+        state_copy.yaw_speed());
+}
+
+void SDK2SportControl::onSportStateMessage(const void* msg) {
+    std::lock_guard<std::mutex> lock(sport_state_mutex_);
+    current_sport_state_ = *reinterpret_cast<const unitree_go::msg::dds_::SportModeState_*>(msg);
 }
