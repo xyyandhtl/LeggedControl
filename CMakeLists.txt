@@ -86,7 +86,7 @@ include_directories(include)
 
 # Include standalone CMakeLists
 add_subdirectory(src/standalone)
-add_subdirectory(tools)
+# add_subdirectory(tools)
 
 # ROS2依赖 (如果不构建 ROS2 node，注释掉下面所有内容)
 find_package(ament_cmake REQUIRED)
@@ -106,9 +106,8 @@ add_executable(aliengo_node
 add_executable(go2_node
   src/go2_node.cpp
   src/base_robot_control.cpp
-  src/sdk2_robot_control.cpp
-  src/sdk2_sport_controller.cpp
-  src/sdk2_policy_controller.cpp
+  src/sdk2_sport_control.cpp
+  src/sdk2_policy_control.cpp
 )
 
 # ament依赖
