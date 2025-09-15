@@ -2,6 +2,8 @@
 #include <unitree/robot/channel/channel_factory.hpp>
 #include <iostream>
 
+#include <cmath>
+
 SDK2SportControl::SDK2SportControl(const rclcpp::NodeOptions & options)
     : rclcpp::Node("go2_sport_node", options),
       last_ros_cmd_time_(this->now())  // Set initial ROS command time to avoid immediate timeout
@@ -78,7 +80,8 @@ void SDK2SportControl::onJoystickMessage(const void *msg) {
 
 void SDK2SportControl::controlLoop() {
     float vx = 0.0f, vy = 0.0f, wz = 0.0f;
-    bool is_joystick_active = gamepad_.ly != 0.0f || gamepad_.lx != 0.0f || gamepad_.rx != 0.0f;
+    bool is_joystick_active = std::abs(gamepad_.ly) > joystick_dead_zone_ || std::abs(gamepad_.lx) > joystick_dead_zone_ ||
+        std::abs(gamepad_.rx) > joystick_dead_zone_;
 
     if (is_joystick_active) {
         // Priority 1: Physical joystick is being used

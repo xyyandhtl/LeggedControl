@@ -71,6 +71,7 @@ private:
     // Parameters
     float max_vx_, max_vy_, max_wz_;
     float stale_timeout_s_;
+    float joystick_dead_zone_ = 0.01f;
 };
 
 #endif // SDK2_POLICY_CONTROL_H

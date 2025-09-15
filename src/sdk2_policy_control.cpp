@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <iterator>
 #include <thread>
+#include <cmath>
 
 // Constants from examples
 static constexpr float PosStopF = (2.146E+9f);
@@ -135,7 +136,8 @@ void SDK2PolicyControl::controlLoop() {
     if (!isControlLoopRunning()) return;
 
     float vx = 0.0f, vy = 0.0f, wz = 0.0f;
-    bool is_joystick_active = gamepad_.ly != 0.0f || gamepad_.lx != 0.0f || gamepad_.rx != 0.0f;
+    bool is_joystick_active = std::abs(gamepad_.ly) > joystick_dead_zone_ || std::abs(gamepad_.lx) > joystick_dead_zone_ || 
+        std::abs(gamepad_.rx) > joystick_dead_zone_;
 
     if (is_joystick_active) {
         // Priority 1: Physical joystick is being used
