@@ -53,7 +53,7 @@ SDK2SportControl::SDK2SportControl(const rclcpp::NodeOptions & options)
     // Initialize control loop timer
     using namespace std::chrono_literals;
     auto period = std::chrono::microseconds(static_cast<int64_t>(1'000'000 / std::max(1, control_rate_hz)));
-    control_timer_ = this->create_wall_timer(period, std::bind(&SDK2SportControl::controlLoop, this));
+//    control_timer_ = this->create_wall_timer(period, std::bind(&SDK2SportControl::controlLoop, this));
 
     RCLCPP_INFO(get_logger(), "Go2/W Sport Control Node started successfully.");
 }
@@ -69,6 +69,8 @@ void SDK2SportControl::onTwist(const geometry_msgs::msg::Twist::SharedPtr msg) {
     ros_vel_cmd_[0] = std::max(-max_vx_, std::min(static_cast<float>(msg->linear.x), max_vx_));
     ros_vel_cmd_[1] = std::max(-max_vy_, std::min(static_cast<float>(msg->linear.y), max_vy_));
     ros_vel_cmd_[2] = std::max(-max_wz_, std::min(static_cast<float>(msg->angular.z), max_wz_));
+    int ret = sport_client_->Move(ros_vel_cmd_[0], ros_vel_cmd_[1], ros_vel_cmd_[2]);
+    RCLCPP_DEBUG(get_logger(), "\t\tMove ret: %d", ret);
     last_ros_cmd_time_ = this->now();
     sent_stop_ = false;
 }
@@ -90,18 +92,18 @@ void SDK2SportControl::controlLoop() {
         wz = gamepad_.rx * max_wz_;
         sent_stop_ = false;
     } else {
-        if ((this->now() - last_ros_cmd_time_).seconds() <= stale_timeout_s_) {
+//        if ((this->now() - last_ros_cmd_time_).seconds() <= stale_timeout_s_) {
             // Priority 2: ROS /cmd_vel is active
             vx = ros_vel_cmd_[0];
             vy = ros_vel_cmd_[1];
             wz = ros_vel_cmd_[2];
-        } else {
-            // Priority 3: No joystick input and ROS command timed out
-            if (!sent_stop_) {
-                sport_client_->StopMove();
-                sent_stop_ = true;
-            }
-        }
+//        } else {
+//            // Priority 3: No joystick input and ROS command timed out
+//            if (!sent_stop_) {
+//                sport_client_->StopMove();
+//                sent_stop_ = true;
+//            }
+//        }
     }
 
     if (is_joystick_active || !sent_stop_) {
